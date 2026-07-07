@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import logging
 
 from fastapi import Depends, FastAPI
@@ -10,8 +11,26 @@ from app.routers import admin, auth, problems
 from app.schemas import UserRead
 from app.services.judge import recover_interrupted_judges
 
-app = FastAPI(title="SQL Online Judge", version="0.1.0")
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        submissions, databases = recover_interrupted_judges()
+    except Exception:
+        logger.warning("Judge recovery failed during startup", exc_info=True)
+    else:
+        if submissions or databases:
+            logger.info(
+                "Recovered %s interrupted submissions and dropped %s stale judge databases",
+                submissions,
+                databases,
+            )
+    yield
+
+
+app = FastAPI(title="SQL Online Judge", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,17 +43,6 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(problems.router)
 app.include_router(admin.router)
-
-
-@app.on_event("startup")
-def recover_judge_state() -> None:
-    try:
-        submissions, databases = recover_interrupted_judges()
-    except Exception:
-        logger.warning("Judge recovery failed during startup", exc_info=True)
-        return
-    if submissions or databases:
-        logger.info("Recovered %s interrupted submissions and dropped %s stale judge databases", submissions, databases)
 
 
 @app.get("/api/me", response_model=UserRead)

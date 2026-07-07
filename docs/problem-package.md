@@ -39,6 +39,7 @@ time_limit_ms: 3000
 - `judge.sql`: returns the result to compare
 - `expected.csv`: expected output, including the header row
 - SQL `NULL` is represented as `\N`; the literal text `NULL` is treated as a string
+- Result values are compared as exact CSV text after PostgreSQL formatting; numeric-looking values and whitespace are not normalized, so `1`, `1.0`, and `1 ` are different
 
 For query-only problems, set `judge.sql` to:
 
