@@ -1,0 +1,10 @@
+slug: vip-users
+title: 创建高价值用户表
+difficulty: 简单
+tags:
+  - INSERT
+  - CREATE TABLE
+checker: result
+ordered: true
+time_limit_ms: 3000
+

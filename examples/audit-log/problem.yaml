@@ -1,0 +1,10 @@
+slug: audit-log
+title: 创建审计日志表
+difficulty: 简单
+tags:
+  - DDL
+  - CREATE TABLE
+checker: result
+ordered: true
+time_limit_ms: 3000
+

@@ -1,0 +1,10 @@
+slug: employee-query
+title: 高薪员工查询
+difficulty: 入门
+tags:
+  - SELECT
+  - ORDER BY
+checker: result
+ordered: true
+time_limit_ms: 3000
+

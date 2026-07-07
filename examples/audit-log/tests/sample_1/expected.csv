@@ -1,0 +1,5 @@
+column_name,data_type,is_nullable
+id,integer,NO
+action,text,NO
+created_at,timestamp without time zone,NO
+
