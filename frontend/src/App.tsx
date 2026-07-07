@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Database, LogOut, Shield, TerminalSquare } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, Database, LogOut, Shield, TerminalSquare } from "lucide-react";
 import { api, clearToken, getToken } from "./lib/api";
 import AuthPage from "./pages/AuthPage";
 import ProblemsPage from "./pages/ProblemsPage";
@@ -11,6 +12,12 @@ function App() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const hasToken = Boolean(getToken());
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem("sidebar_collapsed") === "1"
+  );
+  useEffect(() => {
+    localStorage.setItem("sidebar_collapsed", collapsed ? "1" : "0");
+  }, [collapsed]);
   const { data: user, isError: userError, isLoading: userLoading } = useQuery({
     queryKey: ["me"],
     queryFn: api.me,
@@ -42,26 +49,33 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${collapsed ? " collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
-          <Database size={22} />
-          <span>SQL Judge</span>
+          <button
+            className="icon-button"
+            onClick={() => setCollapsed((c) => !c)}
+            title={collapsed ? "展开侧栏" : "收起侧栏"}
+          >
+            {collapsed ? <ChevronsRight size={18} /> : <ChevronsLeft size={18} />}
+          </button>
+          <Database size={22} className="brand-icon" />
+          <span className="brand-text">SQL Judge</span>
         </div>
         <nav className="nav">
           <Link to="/problems">
             <TerminalSquare size={18} />
-            题库
+            <span className="nav-link-text">题库</span>
           </Link>
           {user.role === "admin" && (
             <Link to="/admin">
               <Shield size={18} />
-              管理
+              <span className="nav-link-text">管理</span>
             </Link>
           )}
         </nav>
         <div className="account">
-          <div>
+          <div className="account-info">
             <strong>{user.username}</strong>
             <span>{user.role === "admin" ? "管理员" : "练习者"}</span>
           </div>

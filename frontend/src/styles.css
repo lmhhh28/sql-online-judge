@@ -117,6 +117,28 @@ a {
   cursor: pointer;
 }
 
+@media (min-width: 981px) {
+  .app-shell.collapsed {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+  .app-shell.collapsed .brand {
+    padding: 0;
+    justify-content: center;
+  }
+  .app-shell.collapsed .brand-icon,
+  .app-shell.collapsed .brand-text,
+  .app-shell.collapsed .nav-link-text,
+  .app-shell.collapsed .account-info {
+    display: none;
+  }
+  .app-shell.collapsed .nav a {
+    justify-content: center;
+  }
+  .app-shell.collapsed .account {
+    justify-content: center;
+  }
+}
+
 .main {
   min-width: 0;
 }
@@ -450,18 +472,13 @@ summary {
 
 .editor-pane {
   padding: 16px;
-  display: grid;
-  grid-template-rows: auto minmax(300px, 46vh) auto auto;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
-.editor-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
 .editor-frame {
+  flex: 1 1 320px;
   min-height: 300px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -469,8 +486,21 @@ summary {
   background: #fff;
 }
 
+.editor-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 0;
+  background: #f4f6f8;
+  border-top: 1px solid var(--line);
+}
+
 .result-pane,
 .history-pane {
+  flex: 0 0 auto;
   padding: 14px;
   display: grid;
   gap: 12px;

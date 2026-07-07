@@ -6,6 +6,9 @@ import remarkGfm from "remark-gfm";
 import { useParams } from "react-router-dom";
 import { CheckCircle2, Play, Send, XCircle } from "lucide-react";
 import { api, Submission } from "../lib/api";
+import { createCompletionProvider, parseSchema } from "../lib/sqlCompletion";
+
+type Monaco = typeof import("monaco-editor/esm/vs/editor/editor.api");
 
 const DEFAULT_SQL = "-- 在这里编写 PostgreSQL SQL\nselect 1 as answer;\n";
 
@@ -28,6 +31,7 @@ export default function ProblemPage() {
   });
   const [code, setCode] = useState(DEFAULT_SQL);
   const [activeSubmission, setActiveSubmission] = useState<Submission | null>(null);
+  const [monacoInstance, setMonacoInstance] = useState<Monaco | null>(null);
 
   const refreshSubmission = async (id: number) => {
     const fresh = await api.submission(id);
@@ -41,6 +45,16 @@ export default function ProblemPage() {
     const timer = window.setInterval(() => refreshSubmission(activeSubmission.id), 1000);
     return () => window.clearInterval(timer);
   }, [activeSubmission?.id, activeSubmission?.status]);
+
+  useEffect(() => {
+    if (!monacoInstance) return;
+    const schema = parseSchema(problem?.schema_md ?? "");
+    const disposable = monacoInstance.languages.registerCompletionItemProvider(
+      "pgsql",
+      createCompletionProvider(monacoInstance, schema)
+    );
+    return () => disposable.dispose();
+  }, [monacoInstance, problem?.schema_md]);
 
   const runMutation = useMutation({
     mutationFn: () => api.run(slug, code),
@@ -81,22 +95,13 @@ export default function ProblemPage() {
         </section>
       </section>
       <section className="editor-pane">
-        <div className="editor-toolbar">
-          <button className="secondary-button" onClick={() => runMutation.mutate()} disabled={runMutation.isPending}>
-            <Play size={17} />
-            运行
-          </button>
-          <button className="primary-button" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>
-            <Send size={17} />
-            提交
-          </button>
-        </div>
         <div className="editor-frame">
           <Editor
             height="100%"
-            defaultLanguage="sql"
+            defaultLanguage="pgsql"
             value={code}
             onChange={(value) => setCode(value ?? "")}
+            onMount={(_editor, monaco) => setMonacoInstance(monaco)}
             options={{ minimap: { enabled: false }, fontSize: 14, scrollBeyondLastLine: false }}
           />
         </div>
@@ -140,6 +145,16 @@ export default function ProblemPage() {
             </button>
           ))}
         </section>
+        <div className="editor-actions">
+          <button className="secondary-button" onClick={() => runMutation.mutate()} disabled={runMutation.isPending}>
+            <Play size={17} />
+            运行
+          </button>
+          <button className="primary-button" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>
+            <Send size={17} />
+            提交
+          </button>
+        </div>
       </section>
     </div>
   );
