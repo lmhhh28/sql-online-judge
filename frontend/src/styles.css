@@ -118,6 +118,13 @@ a {
 }
 
 @media (min-width: 981px) {
+  .sidebar {
+    align-self: start;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
   .app-shell.collapsed {
     grid-template-columns: 64px minmax(0, 1fr);
   }
@@ -362,17 +369,11 @@ input {
 .problem-workspace {
   display: grid;
   grid-template-columns: minmax(360px, 46%) minmax(420px, 54%);
-  height: 100vh;
-  min-height: 720px;
-}
-
-.statement-pane,
-.editor-pane {
-  min-width: 0;
-  overflow: auto;
+  align-items: start;
 }
 
 .statement-pane {
+  min-width: 0;
   padding: 24px;
   background: #fff;
   border-right: 1px solid var(--line);
@@ -471,10 +472,20 @@ summary {
 }
 
 .editor-pane {
+  min-width: 0;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow: auto;
+}
+
+@media (min-width: 981px) {
+  .editor-pane {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
 }
 
 .editor-frame {
@@ -655,6 +666,42 @@ summary {
 .empty-row {
   padding: 18px;
   color: var(--muted);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 6px 0 4px;
+}
+
+.page-info {
+  font-size: 14px;
+  color: var(--muted);
+  min-width: 56px;
+  text-align: center;
+}
+
+.page-button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2933;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.page-button:hover:not(:disabled) {
+  background: #f3f6fa;
+}
+
+.page-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 @media (max-width: 980px) {

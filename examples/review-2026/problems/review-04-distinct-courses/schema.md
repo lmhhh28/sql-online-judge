@@ -1,1 +1,8 @@
-enrollments(student_id, course_id, semester, score)
+```sql
+create table enrollments (
+  student_id int,
+  course_id text,
+  semester text,
+  score int
+);
+```

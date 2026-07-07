@@ -1,1 +1,9 @@
-employees(emp_no, name, dept_no, salary, hire_date)
+```sql
+create table employees (
+  emp_no int primary key,
+  name text,
+  dept_no text,
+  salary int,
+  hire_date date
+);
+```

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+import re
 import shutil
 import sys
 import uuid
@@ -73,6 +74,55 @@ def fetch_csv(cursor) -> str:
     columns = [desc.name for desc in cursor.description or []]
     rows = cursor.fetchall() if cursor.description else []
     return rows_to_csv(columns, rows)
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    parts: list[str] = []
+    depth = 0
+    cur: list[str] = []
+    for ch in text:
+        if ch == "(":
+            depth += 1
+            cur.append(ch)
+        elif ch == ")":
+            depth -= 1
+            cur.append(ch)
+        elif ch == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    if cur:
+        parts.append("".join(cur))
+    return parts
+
+
+def derive_schema_ddl(setup_sql: str) -> str:
+    statements: list[str] = []
+    pattern = re.compile(r"create\s+table\s+(?:if\s+not\s+exists\s+)?([a-zA-Z_]\w*)\s*\(", re.IGNORECASE)
+    for m in pattern.finditer(setup_sql):
+        table_name = m.group(1)
+        start = m.end() - 1
+        depth = 0
+        end = None
+        for i in range(start, len(setup_sql)):
+            if setup_sql[i] == "(":
+                depth += 1
+            elif setup_sql[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end is None:
+            continue
+        inner = setup_sql[start + 1 : end]
+        cols = [c.strip() for c in _split_top_level_commas(inner) if c.strip()]
+        if not cols:
+            continue
+        statements.append(f"create table {table_name} (\n  " + ",\n  ".join(cols) + "\n);")
+    if not statements:
+        return ""
+    return "```sql\n" + "\n\n".join(statements) + "\n```"
 
 
 def create_database(db_name: str) -> None:
@@ -1844,7 +1894,10 @@ def write_problem(problem: ProblemSpec) -> None:
     }
     (problem_dir / "problem.yaml").write_text(yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False), encoding="utf-8")
     (problem_dir / "statement.md").write_text(problem.statement.strip() + "\n", encoding="utf-8")
-    (problem_dir / "schema.md").write_text(problem.schema.strip() + "\n", encoding="utf-8")
+    schema_md = derive_schema_ddl(problem.tests[0].setup_sql) if problem.tests else ""
+    if not schema_md:
+        schema_md = problem.schema.strip()
+    (problem_dir / "schema.md").write_text(schema_md + "\n", encoding="utf-8")
 
     for test in problem.tests:
         test_dir = problem_dir / "tests" / test.name

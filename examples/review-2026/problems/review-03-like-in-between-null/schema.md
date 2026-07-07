@@ -1,1 +1,9 @@
-students(student_id, name, city, score, email)
+```sql
+create table students (
+  student_id int primary key,
+  name text,
+  city text,
+  score int,
+  email text
+);
+```

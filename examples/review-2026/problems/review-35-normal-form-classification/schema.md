@@ -1,1 +1,8 @@
-nf_cases(case_id, all_attrs_atomic, has_partial_dependency, has_transitive_dependency)
+```sql
+create table nf_cases (
+  case_id int primary key,
+  all_attrs_atomic boolean,
+  has_partial_dependency boolean,
+  has_transitive_dependency boolean
+);
+```

@@ -1,1 +1,6 @@
-sql_keywords(id, keyword)
+```sql
+create table sql_keywords (
+  id int primary key,
+  keyword text
+);
+```
