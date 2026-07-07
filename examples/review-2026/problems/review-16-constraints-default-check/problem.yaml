@@ -1,0 +1,11 @@
+slug: review-16-constraints-default-check
+title: 完整性约束：非空、唯一、检查、默认值
+difficulty: 中等
+tags:
+- Constraint
+- DEFAULT
+- CHECK
+- UNIQUE
+checker: result
+ordered: true
+time_limit_ms: 3000

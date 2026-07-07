@@ -1,0 +1,10 @@
+slug: review-23-name-suffix-order
+title: 按照 first_name 最后两个字母排序
+difficulty: 简单
+tags:
+- ORDER BY
+- string function
+- program.md
+checker: result
+ordered: true
+time_limit_ms: 3000

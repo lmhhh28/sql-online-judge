@@ -1,0 +1,10 @@
+slug: review-12-set-operations
+title: UNION、INTERSECT、EXCEPT 集合查询
+difficulty: 中等
+tags:
+- UNION
+- INTERSECT
+- EXCEPT
+checker: result
+ordered: true
+time_limit_ms: 3000

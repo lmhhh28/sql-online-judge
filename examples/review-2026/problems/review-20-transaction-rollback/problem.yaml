@@ -1,0 +1,10 @@
+slug: review-20-transaction-rollback
+title: COMMIT、ROLLBACK 事务控制
+difficulty: 中等
+tags:
+- COMMIT
+- ROLLBACK
+- TCL
+checker: result
+ordered: true
+time_limit_ms: 3000

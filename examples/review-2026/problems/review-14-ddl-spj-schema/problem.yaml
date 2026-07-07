@@ -1,0 +1,12 @@
+slug: review-14-ddl-spj-schema
+title: DDL：创建 SPJ 表并定义主外键
+difficulty: 中等
+tags:
+- CREATE
+- PRIMARY KEY
+- FOREIGN KEY
+- SPJ
+- PDF
+checker: result
+ordered: true
+time_limit_ms: 3000

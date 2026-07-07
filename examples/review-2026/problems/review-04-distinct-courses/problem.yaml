@@ -1,0 +1,8 @@
+slug: review-04-distinct-courses
+title: DISTINCT 去重
+difficulty: 简单
+tags:
+- DISTINCT
+checker: result
+ordered: true
+time_limit_ms: 3000

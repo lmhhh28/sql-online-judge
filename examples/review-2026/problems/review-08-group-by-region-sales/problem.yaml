@@ -1,0 +1,9 @@
+slug: review-08-group-by-region-sales
+title: GROUP BY 分组汇总
+difficulty: 简单
+tags:
+- GROUP BY
+- SUM
+checker: result
+ordered: true
+time_limit_ms: 3000

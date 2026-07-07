@@ -1,0 +1,10 @@
+slug: review-29-current-title-avg-salary
+title: 统计当前 title 的当前平均薪水
+difficulty: 中等
+tags:
+- AVG
+- JOIN
+- program.md
+checker: result
+ordered: true
+time_limit_ms: 3000

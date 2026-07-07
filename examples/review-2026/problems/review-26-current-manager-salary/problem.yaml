@@ -1,0 +1,9 @@
+slug: review-26-current-manager-salary
+title: 获取当前部门经理当前薪水
+difficulty: 中等
+tags:
+- JOIN
+- program.md
+checker: result
+ordered: true
+time_limit_ms: 3000

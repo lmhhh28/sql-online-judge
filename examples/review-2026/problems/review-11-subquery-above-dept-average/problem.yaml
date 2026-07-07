@@ -1,0 +1,8 @@
+slug: review-11-subquery-above-dept-average
+title: 子查询：高于部门平均工资
+difficulty: 中等
+tags:
+- Subquery
+checker: result
+ordered: true
+time_limit_ms: 3000

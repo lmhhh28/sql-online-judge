@@ -1,0 +1,8 @@
+slug: review-10-join-employees-departments
+title: JOIN 连接查询
+difficulty: 简单
+tags:
+- JOIN
+checker: result
+ordered: true
+time_limit_ms: 3000

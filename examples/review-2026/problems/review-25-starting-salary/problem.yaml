@@ -1,0 +1,9 @@
+slug: review-25-starting-salary
+title: 查找所有员工入职时薪水
+difficulty: 中等
+tags:
+- JOIN
+- program.md
+checker: result
+ordered: true
+time_limit_ms: 3000

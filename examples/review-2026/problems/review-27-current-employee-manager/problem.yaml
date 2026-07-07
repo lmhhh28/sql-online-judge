@@ -1,0 +1,9 @@
+slug: review-27-current-employee-manager
+title: 获取所有员工当前 manager
+difficulty: 中等
+tags:
+- JOIN
+- program.md
+checker: result
+ordered: true
+time_limit_ms: 3000

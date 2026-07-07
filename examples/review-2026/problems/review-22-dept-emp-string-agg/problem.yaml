@@ -1,0 +1,10 @@
+slug: review-22-dept-emp-string-agg
+title: 按照 dept_no 汇总员工编号
+difficulty: 中等
+tags:
+- GROUP BY
+- string_agg
+- program.md
+checker: result
+ordered: true
+time_limit_ms: 3000

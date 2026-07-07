@@ -1,0 +1,10 @@
+slug: review-15-alter-drop-truncate
+title: ALTER、DROP、TRUNCATE 综合操作
+difficulty: 中等
+tags:
+- ALTER
+- DROP
+- TRUNCATE
+checker: result
+ordered: true
+time_limit_ms: 3000

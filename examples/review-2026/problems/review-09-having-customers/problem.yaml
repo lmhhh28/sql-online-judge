@@ -1,0 +1,9 @@
+slug: review-09-having-customers
+title: HAVING 分组筛选
+difficulty: 中等
+tags:
+- GROUP BY
+- HAVING
+checker: result
+ordered: true
+time_limit_ms: 3000

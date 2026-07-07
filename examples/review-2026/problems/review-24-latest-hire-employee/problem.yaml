@@ -1,0 +1,9 @@
+slug: review-24-latest-hire-employee
+title: 查找最晚入职员工
+difficulty: 简单
+tags:
+- Subquery
+- program.md
+checker: result
+ordered: true
+time_limit_ms: 3000

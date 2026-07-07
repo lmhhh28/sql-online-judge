@@ -1,0 +1,10 @@
+slug: review-13-dml-bonus-salary
+title: DML：给获奖员工当前薪水加 10%
+difficulty: 中等
+tags:
+- UPDATE
+- DML
+- program.md
+checker: result
+ordered: true
+time_limit_ms: 3000

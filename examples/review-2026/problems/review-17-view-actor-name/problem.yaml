@@ -1,0 +1,9 @@
+slug: review-17-view-actor-name
+title: 视图：actor_name_view
+difficulty: 简单
+tags:
+- VIEW
+- program.md
+checker: result
+ordered: true
+time_limit_ms: 3000
