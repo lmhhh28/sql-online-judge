@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from io import BytesIO
 from pathlib import PurePosixPath
 from zipfile import BadZipFile, ZipFile
@@ -78,6 +79,7 @@ def import_problem_package(db: Session, package_bytes: bytes) -> ImportSummary:
         problem.ordered = bool(metadata.get("ordered", False))
         problem.time_limit_ms = int(metadata.get("time_limit_ms", 3000))
         problem.is_active = bool(metadata.get("is_active", True))
+        problem.updated_at = datetime.utcnow()
 
         problem.test_cases.clear()
         imported_cases = 0
@@ -104,4 +106,3 @@ def import_problem_package(db: Session, package_bytes: bytes) -> ImportSummary:
         db.commit()
         db.refresh(problem)
         return ImportSummary(problem=problem, imported_cases=imported_cases)
-

@@ -37,7 +37,7 @@ class Problem(Base):
     time_limit_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=3000)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     test_cases = relationship("TestCase", back_populates="problem", cascade="all, delete-orphan")
     submissions = relationship("Submission", back_populates="problem")

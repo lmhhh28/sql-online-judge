@@ -71,11 +71,12 @@ def _create_submission(
     if problem is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found")
 
-    selected_cases = select(TestCase).where(TestCase.problem_id == problem.id)
+    selected_cases = select(TestCase.id).where(TestCase.problem_id == problem.id)
     if mode == "run":
         selected_cases = selected_cases.where(TestCase.is_hidden.is_(False))
-    if (db.scalar(select(TestCase.id).where(TestCase.problem_id == problem.id).limit(1))) is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Problem has no test cases")
+    if db.scalar(selected_cases.limit(1)) is None:
+        detail = "Problem has no public test cases" if mode == "run" else "Problem has no test cases"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
     submission = Submission(user_id=current_user.id, problem_id=problem.id, code=payload.code, mode=mode)
     db.add(submission)

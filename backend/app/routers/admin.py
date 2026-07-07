@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -66,6 +68,7 @@ def update_problem(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found")
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(problem, key, value)
+    problem.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(problem)
     return problem_to_detail(problem)
@@ -82,6 +85,7 @@ def add_test_case(
     if problem is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found")
     problem.test_cases.append(TestCase(**payload.model_dump()))
+    problem.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(problem)
     return problem_to_detail(problem)
@@ -99,4 +103,3 @@ def admin_submissions(
         .limit(100)
     )
     return [submission_to_read(db, submission, viewer_is_admin=True) for submission in db.scalars(query)]
-

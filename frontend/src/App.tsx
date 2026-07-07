@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database, LogOut, Shield, TerminalSquare } from "lucide-react";
 import { api, clearToken, getToken } from "./lib/api";
@@ -49,15 +49,15 @@ function App() {
           <span>SQL Judge</span>
         </div>
         <nav className="nav">
-          <a href="/problems">
+          <Link to="/problems">
             <TerminalSquare size={18} />
             题库
-          </a>
+          </Link>
           {user.role === "admin" && (
-            <a href="/admin">
+            <Link to="/admin">
               <Shield size={18} />
               管理
-            </a>
+            </Link>
           )}
         </nav>
         <div className="account">

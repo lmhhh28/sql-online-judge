@@ -1,8 +1,9 @@
 import csv
 import io
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
+
+NULL_MARKER = r"\N"
 
 
 @dataclass(frozen=True)
@@ -12,13 +13,9 @@ class CompareResult:
 
 
 def _normalize_cell(value: str) -> Any:
-    text = value.strip()
-    if text.upper() == "NULL":
+    if value == NULL_MARKER:
         return None
-    try:
-        return Decimal(text).normalize()
-    except (InvalidOperation, ValueError):
-        return text
+    return value
 
 
 def parse_csv_table(text: str) -> tuple[list[str], list[list[str]]]:
@@ -36,7 +33,7 @@ def rows_to_csv(columns: Iterable[str], rows: Iterable[Iterable[Any]]) -> str:
     writer = csv.writer(stream, lineterminator="\n")
     writer.writerow(list(columns))
     for row in rows:
-        writer.writerow(["NULL" if cell is None else cell for cell in row])
+        writer.writerow([NULL_MARKER if cell is None else cell for cell in row])
     return stream.getvalue()
 
 

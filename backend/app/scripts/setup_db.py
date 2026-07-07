@@ -15,6 +15,14 @@ def main() -> None:
                     sql.Identifier(settings.judge_runner_role)
                 )
             )
+        current_user = conn.execute("SELECT current_user").fetchone()[0]
+        if current_user != settings.judge_runner_role:
+            conn.execute(
+                sql.SQL("GRANT {} TO {}").format(
+                    sql.Identifier(settings.judge_runner_role),
+                    sql.Identifier(current_user),
+                )
+            )
 
         db_exists = conn.execute("SELECT 1 FROM pg_database WHERE datname = 'sql_oj'").fetchone()
         if db_exists is None:
@@ -25,4 +33,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

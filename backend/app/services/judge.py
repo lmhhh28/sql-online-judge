@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Optional
 
 import psycopg
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg import errors, sql
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +17,18 @@ from app.database import SessionLocal
 from app.models import Problem, Submission, TestCase, TestResult
 from app.services.comparator import compare_csv_tables, compare_string, rows_to_csv
 from app.services.sql_guard import UnsafeSqlError, validate_user_sql
+
+RUN_DB_PREFIX = "oj_run_"
+USER_OUTPUT_SENTINEL = "__USER_OUTPUT__"
+TERMINAL_ERROR_STATUSES = {"CE", "RE", "TLE", "SE"}
+STATUS_PRIORITY = {
+    "AC": 0,
+    "WA": 1,
+    "CE": 2,
+    "RE": 3,
+    "TLE": 4,
+    "SE": 5,
+}
 
 
 @dataclass(frozen=True)
@@ -35,7 +48,57 @@ def _admin_conninfo(database: Optional[str] = None) -> str:
     conninfo = _psycopg_url(settings.admin_database_url)
     if database is None:
         return conninfo
-    return conninfo.replace("/postgres?", f"/{database}?", 1)
+    params = conninfo_to_dict(conninfo)
+    params["dbname"] = database
+    return make_conninfo(**params)
+
+
+def _merge_status(current: str, candidate: str) -> str:
+    if STATUS_PRIORITY.get(candidate, 0) > STATUS_PRIORITY.get(current, 0):
+        return candidate
+    return current
+
+
+def _cursor_to_csv(cursor) -> str:
+    columns = [desc.name for desc in cursor.description or []]
+    rows = cursor.fetchall() if cursor.description else []
+    return rows_to_csv(columns, rows)
+
+
+def cleanup_stale_run_databases() -> int:
+    with psycopg.connect(_admin_conninfo(), autocommit=True) as conn:
+        db_names = [
+            row[0]
+            for row in conn.execute(
+                "SELECT datname FROM pg_database WHERE datname LIKE %s",
+                (f"{RUN_DB_PREFIX}%",),
+            )
+        ]
+
+    dropped = 0
+    for db_name in db_names:
+        try:
+            _drop_run_database(db_name)
+            dropped += 1
+        except Exception:
+            continue
+    return dropped
+
+
+def recover_interrupted_judges() -> tuple[int, int]:
+    dropped = cleanup_stale_run_databases()
+    db = SessionLocal()
+    try:
+        interrupted = list(db.scalars(select(Submission).where(Submission.status.in_(("PENDING", "RUNNING")))))
+        now = datetime.utcnow()
+        for submission in interrupted:
+            submission.status = "SE"
+            submission.error_message = "Judge interrupted before completion"
+            submission.completed_at = now
+        db.commit()
+        return len(interrupted), dropped
+    finally:
+        db.close()
 
 
 def _create_run_database(db_name: str) -> None:
@@ -58,8 +121,9 @@ def _drop_run_database(db_name: str) -> None:
 
 
 def _run_sql_case(submission: Submission, problem: Problem, case: TestCase) -> CaseOutcome:
-    run_db = f"oj_run_{submission.id}_{case.id}_{uuid.uuid4().hex[:8]}"[:60]
+    run_db = f"{RUN_DB_PREFIX}{submission.id}_{case.id}_{uuid.uuid4().hex[:8]}"[:60]
     started = time.perf_counter()
+    user_runtime_ms = 0
     try:
         validate_user_sql(submission.code)
         _create_run_database(run_db)
@@ -74,27 +138,43 @@ def _run_sql_case(submission: Submission, problem: Problem, case: TestCase) -> C
                 if case.setup_sql.strip():
                     conn.execute(case.setup_sql)
             except Exception as exc:
-                return CaseOutcome("SE", 0.0, _elapsed_ms(started), f"setup.sql failed: {exc}")
+                return CaseOutcome("SE", 0.0, 0, f"setup.sql failed: {exc}")
 
             try:
                 user_output = None
+                capture_user_output = case.judge_sql.strip() == USER_OUTPUT_SENTINEL
                 if submission.code.strip():
+                    user_started = time.perf_counter()
                     cursor = conn.execute(submission.code)
-                    if cursor.description:
-                        columns = [desc.name for desc in cursor.description or []]
-                        rows = cursor.fetchall()
-                        user_output = rows_to_csv(columns, rows)
+                    if capture_user_output:
+                        result_sets = []
+                        if cursor.description:
+                            result_sets.append(_cursor_to_csv(cursor))
+                        while cursor.nextset():
+                            if cursor.description:
+                                result_sets.append(_cursor_to_csv(cursor))
+                        if len(result_sets) > 1:
+                            user_runtime_ms = _elapsed_ms(user_started)
+                            return CaseOutcome(
+                                "WA",
+                                0.0,
+                                user_runtime_ms,
+                                "User SQL returned multiple result sets; return exactly one result set",
+                            )
+                        if result_sets:
+                            user_output = result_sets[0]
+                    user_runtime_ms = _elapsed_ms(user_started)
             except errors.QueryCanceled as exc:
-                return CaseOutcome("TLE", 0.0, _elapsed_ms(started), str(exc))
+                return CaseOutcome("TLE", 0.0, user_runtime_ms or _elapsed_ms(user_started), str(exc))
             except errors.SyntaxError as exc:
-                return CaseOutcome("CE", 0.0, _elapsed_ms(started), str(exc))
+                return CaseOutcome("CE", 0.0, user_runtime_ms or _elapsed_ms(user_started), str(exc))
             except Exception as exc:
-                return CaseOutcome("RE", 0.0, _elapsed_ms(started), str(exc))
+                return CaseOutcome("RE", 0.0, user_runtime_ms or _elapsed_ms(user_started), str(exc))
 
             try:
-                if case.judge_sql.strip() == "__USER_OUTPUT__":
+                if case.judge_sql.strip() == USER_OUTPUT_SENTINEL:
                     if user_output is None:
-                        return CaseOutcome("WA", 0.0, _elapsed_ms(started), "User SQL did not return a result set")
+                        return CaseOutcome("WA", 0.0, user_runtime_ms, "User SQL did not return a result set")
                     actual = user_output
                 else:
                     cursor = conn.execute(case.judge_sql)
@@ -102,9 +182,9 @@ def _run_sql_case(submission: Submission, problem: Problem, case: TestCase) -> C
                     rows = cursor.fetchall() if cursor.description else []
                     actual = rows_to_csv(columns, rows)
             except errors.QueryCanceled as exc:
-                return CaseOutcome("TLE", 0.0, _elapsed_ms(started), str(exc))
+                return CaseOutcome("TLE", 0.0, user_runtime_ms, str(exc))
             except Exception as exc:
-                return CaseOutcome("SE", 0.0, _elapsed_ms(started), f"judge.sql failed: {exc}")
+                return CaseOutcome("SE", 0.0, user_runtime_ms, f"judge.sql failed: {exc}")
 
         if problem.checker == "string":
             compare = compare_string(actual, case.expected_output)
@@ -115,14 +195,14 @@ def _run_sql_case(submission: Submission, problem: Problem, case: TestCase) -> C
         return CaseOutcome(
             "AC" if accepted else "WA",
             case.score if accepted else 0.0,
-            _elapsed_ms(started),
+            user_runtime_ms,
             compare.message,
             actual,
         )
     except UnsafeSqlError as exc:
-        return CaseOutcome("RE", 0.0, _elapsed_ms(started), f"Blocked SQL: {exc}")
+        return CaseOutcome("RE", 0.0, 0, f"Blocked SQL: {exc}")
     except errors.QueryCanceled as exc:
-        return CaseOutcome("TLE", 0.0, _elapsed_ms(started), str(exc))
+        return CaseOutcome("TLE", 0.0, user_runtime_ms, str(exc))
     except Exception as exc:
         return CaseOutcome("SE", 0.0, _elapsed_ms(started), str(exc))
     finally:
@@ -164,11 +244,9 @@ def judge_submission(submission_id: int) -> None:
         final_status = "AC"
 
         for case in cases:
-            db.refresh(submission)
             outcome = _run_sql_case(submission, problem, case)
             total_score += outcome.score
-            if outcome.status != "AC" and final_status == "AC":
-                final_status = outcome.status
+            final_status = _merge_status(final_status, outcome.status)
 
             db.add(
                 TestResult(
@@ -187,9 +265,8 @@ def judge_submission(submission_id: int) -> None:
             )
             db.commit()
 
-            if submission.mode == "submit" and outcome.status in {"CE", "RE", "TLE", "SE"}:
-                # Continue judging hidden cases is unnecessary for the first local version.
-                pass
+            if submission.mode == "submit" and outcome.status in TERMINAL_ERROR_STATUSES:
+                break
 
         submission.score = total_score
         submission.max_score = max_score
@@ -197,6 +274,17 @@ def judge_submission(submission_id: int) -> None:
         submission.error_message = None if final_status == "AC" else "Some test cases failed"
         submission.completed_at = datetime.utcnow()
         db.commit()
+    except Exception as exc:
+        db.rollback()
+        try:
+            submission = db.get(Submission, submission_id)
+            if submission is not None:
+                submission.status = "SE"
+                submission.error_message = f"Judge failed: {exc}"
+                submission.completed_at = datetime.utcnow()
+                db.commit()
+        except Exception:
+            db.rollback()
     finally:
         db.close()
 

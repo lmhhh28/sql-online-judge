@@ -30,7 +30,7 @@ time_limit_ms: 3000
 ```
 
 - `checker`: `result` or `string`
-- `ordered`: `true` means row order must match
+- `ordered`: `true` means row order must match; column names and column order always must match
 - folders whose names start with `sample_` are public; all other folders are hidden
 
 ## Test Case Files
@@ -38,6 +38,7 @@ time_limit_ms: 3000
 - `setup.sql`: creates and seeds the testcase database
 - `judge.sql`: returns the result to compare
 - `expected.csv`: expected output, including the header row
+- SQL `NULL` is represented as `\N`; the literal text `NULL` is treated as a string
 
 For query-only problems, set `judge.sql` to:
 
@@ -45,5 +46,4 @@ For query-only problems, set `judge.sql` to:
 __USER_OUTPUT__
 ```
 
-The judge then compares the user's final result set directly.
-
+The judge then compares the user's final result set directly. User SQL for this mode must return exactly one result set.
