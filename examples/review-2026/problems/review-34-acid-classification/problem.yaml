@@ -1,9 +1,0 @@
-slug: review-34-acid-classification
-title: 事务 ACID 特性判断
-difficulty: 简单
-tags:
-- ACID
-- Theory
-checker: result
-ordered: true
-time_limit_ms: 3000

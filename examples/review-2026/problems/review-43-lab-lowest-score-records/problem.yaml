@@ -1,0 +1,9 @@
+slug: review-43-lab-lowest-score-records
+title: A卷：查询最低成绩实验记录
+difficulty: 中等
+tags:
+- Subquery
+- Exam
+checker: result
+ordered: true
+time_limit_ms: 3000

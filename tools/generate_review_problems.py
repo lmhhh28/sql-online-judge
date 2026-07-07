@@ -24,6 +24,31 @@ ZIPS_DIR = OUTPUT / "zips"
 NULL_MARKER = r"\N"
 USER_OUTPUT_SENTINEL = "__USER_OUTPUT__"
 
+FOCUSED_REVIEW_SLUGS = [
+    "review-09-having-customers",
+    "review-10-join-employees-departments",
+    "review-11-subquery-above-dept-average",
+    "review-13-dml-bonus-salary",
+    "review-17-view-actor-name",
+    "review-24-latest-hire-employee",
+    "review-25-starting-salary",
+    "review-26-current-manager-salary",
+    "review-27-current-employee-manager",
+    "review-29-current-title-avg-salary",
+    "review-30-spj-red-suppliers-j1",
+    "review-31-spj-no-tianjin-red-projects",
+    "review-32-spj-division-s1-parts",
+    "review-33-spj-sanjian-view",
+    "review-38-lab-zhang-teacher-experiments",
+    "review-39-lab-senior-teachers-without-records",
+    "review-40-lab-teachers-all-category-c",
+    "review-41-lab-students-at-least-two",
+    "review-42-lab-overtime-score-update",
+    "review-43-lab-lowest-score-records",
+    "review-44-lab-teacher-student-count",
+    "review-45-lab-student-summary-view",
+]
+
 
 @dataclass(frozen=True)
 class TestSpec:
@@ -243,6 +268,74 @@ insert into spj(sno, pno, jno, qty) values
   ('S5', 'P3', 'J1', 200),
   ('S5', 'P6', 'J2', 200),
   ('S5', 'P6', 'J4', 500);
+
+{extra_sql}
+"""
+
+
+def lab_setup(extra_sql: str = "") -> str:
+    return f"""
+create table lab_teachers (
+  teacher_id text primary key,
+  teacher_name text not null,
+  title text not null,
+  phone text
+);
+
+create table students (
+  student_id text primary key,
+  student_name text not null,
+  class_name text not null,
+  major text not null
+);
+
+create table experiments (
+  experiment_id text primary key,
+  experiment_name text not null,
+  required_minutes integer not null,
+  category text not null
+);
+
+create table experiment_records (
+  student_id text not null references students(student_id),
+  experiment_id text not null references experiments(experiment_id),
+  teacher_id text not null references lab_teachers(teacher_id),
+  actual_minutes integer not null,
+  score integer not null,
+  primary key (student_id, experiment_id)
+);
+
+insert into lab_teachers values
+  ('T1', '张sir', '高工', '13800000001'),
+  ('T2', '李sir', '工程师', '13800000002'),
+  ('T3', '王sir', '高工', '13800000003'),
+  ('T4', '赵sir', '高工', '13800000004'),
+  ('T5', '陈sir', '教授', '13800000005');
+
+insert into students values
+  ('S1', '小王', '计科2301', '计科'),
+  ('S2', '小李', '计科2301', '计科'),
+  ('S3', '小周', '软件2302', '软件'),
+  ('S4', '小陈', '网络2301', '网络');
+
+insert into experiments values
+  ('E1', 'SQL基础', 90, 'A类'),
+  ('E2', '嵌套查询', 120, 'C类'),
+  ('E3', '视图设计', 100, 'C类'),
+  ('E4', '事务恢复', 80, 'B类'),
+  ('E5', '连接查询', 60, 'C类');
+
+insert into experiment_records values
+  ('S1', 'E1', 'T1', 90, 85),
+  ('S1', 'E2', 'T1', 130, 80),
+  ('S1', 'E3', 'T2', 100, 91),
+  ('S1', 'E5', 'T1', 70, 88),
+  ('S2', 'E2', 'T2', 118, 76),
+  ('S2', 'E3', 'T2', 150, 60),
+  ('S2', 'E5', 'T2', 58, 84),
+  ('S3', 'E4', 'T1', 70, 70),
+  ('S3', 'E2', 'T5', 140, 59),
+  ('S4', 'E5', 'T5', 55, 92);
 
 {extra_sql}
 """
@@ -1237,49 +1330,6 @@ insert into sql_keywords values (20, 'TRUNCATE'), (21, 'UPDATE'), (22, 'SELECT')
 
     specs.append(
         ProblemSpec(
-            slug="review-22-dept-emp-string-agg",
-            title="按照 dept_no 汇总员工编号",
-            difficulty="中等",
-            tags=["GROUP BY", "string_agg", "program.md"],
-            statement="按照 `dept_no` 汇总，属于同一部门的 `emp_no` 用英文逗号连接。输出 `dept_no,employees`，部门和员工编号均升序。",
-            schema="dept_emp(emp_no, dept_no, from_date, to_date)",
-            solution_sql="""
-select dept_no,
-       string_agg(emp_no::text, ',' order by emp_no) as employees
-from dept_emp
-group by dept_no
-order by dept_no;
-""",
-            tests=mk_tests(
-                """
-create table dept_emp(emp_no int, dept_no char(4), from_date date, to_date date, primary key(emp_no, dept_no));
-insert into dept_emp values
-  (10002, 'd001', '2020-01-01', '9999-01-01'),
-  (10001, 'd001', '2020-01-01', '9999-01-01'),
-  (10006, 'd002', '2020-01-01', '9999-01-01'),
-  (10005, 'd003', '2020-01-01', '9999-01-01');
-""",
-                """
-create table dept_emp(emp_no int, dept_no char(4), from_date date, to_date date, primary key(emp_no, dept_no));
-insert into dept_emp values
-  (1, 'a001', '2020-01-01', '9999-01-01'),
-  (3, 'a001', '2020-01-01', '9999-01-01'),
-  (2, 'a001', '2020-01-01', '9999-01-01'),
-  (9, 'b001', '2020-01-01', '9999-01-01');
-""",
-                """
-create table dept_emp(emp_no int, dept_no char(4), from_date date, to_date date, primary key(emp_no, dept_no));
-insert into dept_emp values
-  (10, 'd010', '2020-01-01', '9999-01-01'),
-  (11, 'd011', '2020-01-01', '9999-01-01'),
-  (12, 'd010', '2020-01-01', '9999-01-01');
-""",
-            ),
-        )
-    )
-
-    specs.append(
-        ProblemSpec(
             slug="review-23-name-suffix-order",
             title="按照 first_name 最后两个字母排序",
             difficulty="简单",
@@ -1613,18 +1663,20 @@ order by spj.sno;
             slug="review-31-spj-no-tianjin-red-projects",
             title="SPJ：没有使用天津供应商红色零件的工程",
             difficulty="困难",
-            tags=["SPJ", "Subquery", "PDF"],
-            statement="基于 SPJ 数据库，求没有使用天津供应商生产的红色零件的工程号。输出 `jno`，按工程号升序。",
+            tags=["SPJ", "Subquery", "NOT EXISTS", "PDF"],
+            statement="基于 SPJ 数据库，求没有使用天津供应商生产的红色零件的工程号。建议使用 `NOT EXISTS`。输出 `jno`，按工程号升序。",
             schema="s(sno,sname,status,city), p(pno,pname,color,weight), j(jno,jname,city), spj(sno,pno,jno,qty)",
             solution_sql="""
 select j.jno
 from j
-where j.jno not in (
-  select distinct spj.jno
+where not exists (
+  select 1
   from spj
   join s on s.sno = spj.sno
   join p on p.pno = spj.pno
-  where s.city = '天津' and p.color = '红'
+  where spj.jno = j.jno
+    and s.city = '天津'
+    and p.color = '红'
 )
 order by j.jno;
 """,
@@ -1641,7 +1693,7 @@ order by j.jno;
             slug="review-32-spj-division-s1-parts",
             title="SPJ：至少使用 S1 供应全部零件的工程",
             difficulty="困难",
-            tags=["SPJ", "Division", "HAVING", "PDF"],
+            tags=["SPJ", "Division", "NOT EXISTS", "HAVING", "PDF"],
             statement="基于 SPJ 数据库，求至少使用了供应商 `S1` 所供应的全部零件的工程号。输出 `jno`，按工程号升序。",
             schema="s(sno,sname,status,city), p(pno,pname,color,weight), j(jno,jname,city), spj(sno,pno,jno,qty)",
             solution_sql="""
@@ -1874,7 +1926,261 @@ insert into schema_cases values (20, 'conceptual'), (21, 'external'), (22, 'inte
         )
     )
 
-    return specs
+    specs.append(
+        ProblemSpec(
+            slug="review-38-lab-zhang-teacher-experiments",
+            title="A卷：查询张sir带过的实验名称",
+            difficulty="简单",
+            tags=["JOIN", "Exam"],
+            statement="""实验管理数据库包含实验师、学生、实验、实验记录四张表。
+
+请查询实验师 `张sir` 带过的所有实验。
+
+输出 `experiment_id,experiment_name`，去重后按 `experiment_id` 升序。""",
+            schema="lab_teachers, students, experiments, experiment_records",
+            solution_sql="""
+select distinct e.experiment_id, e.experiment_name
+from lab_teachers t
+join experiment_records r on r.teacher_id = t.teacher_id
+join experiments e on e.experiment_id = r.experiment_id
+where t.teacher_name = '张sir'
+order by e.experiment_id;
+""",
+            tests=mk_tests(
+                lab_setup(),
+                lab_setup(
+                    """
+insert into students values ('S5', '小刘', '信安2301', '信安');
+insert into experiment_records values ('S5', 'E3', 'T1', 100, 99);
+"""
+                ),
+                lab_setup("delete from experiment_records where teacher_id = 'T1' and experiment_id = 'E4';"),
+            ),
+        )
+    )
+
+    specs.append(
+        ProblemSpec(
+            slug="review-39-lab-senior-teachers-without-records",
+            title="A卷：没有带过实验课的高工",
+            difficulty="中等",
+            tags=["NOT EXISTS", "Subquery", "Exam"],
+            statement="""查询没有带过实验课的、职称为 `高工` 的实验师。
+
+输出 `teacher_id,teacher_name`，按 `teacher_id` 升序。""",
+            schema="lab_teachers, experiment_records",
+            solution_sql="""
+select t.teacher_id, t.teacher_name
+from lab_teachers t
+where t.title = '高工'
+  and not exists (
+    select 1
+    from experiment_records r
+    where r.teacher_id = t.teacher_id
+  )
+order by t.teacher_id;
+""",
+            tests=mk_tests(
+                lab_setup(),
+                lab_setup("insert into experiment_records values ('S4', 'E4', 'T3', 80, 86);"),
+                lab_setup("delete from experiment_records where teacher_id = 'T1';"),
+            ),
+        )
+    )
+
+    specs.append(
+        ProblemSpec(
+            slug="review-40-lab-teachers-all-category-c",
+            title="A卷：指导过全部 C 类实验的实验师",
+            difficulty="困难",
+            tags=["Division", "NOT EXISTS", "Subquery", "Exam"],
+            statement="""查询指导过实验类别为 `C类` 的所有实验的实验师编号。
+
+这是典型“除法思想”题：对每个实验师，不能存在某个 `C类` 实验是他没有指导过的。
+
+输出 `teacher_id`，按 `teacher_id` 升序。""",
+            schema="lab_teachers, experiments, experiment_records",
+            solution_sql="""
+select t.teacher_id
+from lab_teachers t
+where not exists (
+  select 1
+  from experiments e
+  where e.category = 'C类'
+    and not exists (
+      select 1
+      from experiment_records r
+      where r.teacher_id = t.teacher_id
+        and r.experiment_id = e.experiment_id
+    )
+)
+order by t.teacher_id;
+""",
+            tests=mk_tests(
+                lab_setup(),
+                lab_setup(
+                    """
+insert into students values ('S5', '小刘', '信安2301', '信安');
+insert into experiment_records values ('S5', 'E3', 'T5', 100, 90);
+"""
+                ),
+                lab_setup("delete from experiment_records where teacher_id = 'T2' and experiment_id = 'E3';"),
+            ),
+        )
+    )
+
+    specs.append(
+        ProblemSpec(
+            slug="review-41-lab-students-at-least-two",
+            title="A卷：至少做过 2 个实验的学生",
+            difficulty="简单",
+            tags=["GROUP BY", "HAVING", "Exam"],
+            statement="""查询至少做过 2 个实验的学生。
+
+输出 `student_id,experiment_count`，按 `student_id` 升序。""",
+            schema="students, experiment_records",
+            solution_sql="""
+select student_id, count(*) as experiment_count
+from experiment_records
+group by student_id
+having count(*) >= 2
+order by student_id;
+""",
+            tests=mk_tests(
+                lab_setup(),
+                lab_setup("insert into experiment_records values ('S4', 'E1', 'T3', 90, 82);"),
+                lab_setup("delete from experiment_records where student_id = 'S3' and experiment_id = 'E4';"),
+            ),
+        )
+    )
+
+    specs.append(
+        ProblemSpec(
+            slug="review-42-lab-overtime-score-update",
+            title="A卷：超时完成实验扣分",
+            difficulty="中等",
+            tags=["UPDATE", "JOIN", "Exam"],
+            statement="""将超时完成的实验成绩扣掉 10 分。
+
+超时定义为 `experiment_records.actual_minutes > experiments.required_minutes`。只需要修改数据，不需要输出查询结果。""",
+            schema="experiments, experiment_records",
+            solution_sql="""
+update experiment_records r
+set score = score - 10
+from experiments e
+where e.experiment_id = r.experiment_id
+  and r.actual_minutes > e.required_minutes;
+""",
+            judge_sql="""
+select student_id, experiment_id, teacher_id, actual_minutes, score
+from experiment_records
+order by student_id, experiment_id;
+""",
+            tests=mk_tests(
+                lab_setup(),
+                lab_setup("update experiment_records set actual_minutes = 61, score = 100 where student_id = 'S4' and experiment_id = 'E5';"),
+                lab_setup("update experiment_records set actual_minutes = experiments.required_minutes from experiments where experiments.experiment_id = experiment_records.experiment_id;"),
+            ),
+        )
+    )
+
+    specs.append(
+        ProblemSpec(
+            slug="review-43-lab-lowest-score-records",
+            title="A卷：查询最低成绩实验记录",
+            difficulty="中等",
+            tags=["Subquery", "Exam"],
+            statement="""查询实验成绩最低的实验记录；若最低分有多条，需要全部输出。
+
+输出 `student_id,experiment_id,teacher_id,actual_minutes,score`，按 `student_id,experiment_id` 升序。""",
+            schema="experiment_records",
+            solution_sql="""
+select student_id, experiment_id, teacher_id, actual_minutes, score
+from experiment_records
+where score = (select min(score) from experiment_records)
+order by student_id, experiment_id;
+""",
+            tests=mk_tests(
+                lab_setup(),
+                lab_setup("update experiment_records set score = 59 where student_id = 'S2' and experiment_id = 'E3';"),
+                lab_setup("update experiment_records set score = 100 where student_id = 'S3' and experiment_id = 'E2';"),
+            ),
+        )
+    )
+
+    specs.append(
+        ProblemSpec(
+            slug="review-44-lab-teacher-student-count",
+            title="A卷：统计每个实验师带过的学生人数",
+            difficulty="中等",
+            tags=["GROUP BY", "JOIN", "Exam"],
+            statement="""查询每个实验师所带实验的累计学生人数，同一学生被同一实验师带过多次只算 1 人。
+
+只输出带过实验的实验师。输出 `teacher_id,student_count`，按 `student_count` 降序、`teacher_id` 升序。""",
+            schema="lab_teachers, experiment_records",
+            solution_sql="""
+select t.teacher_id,
+       count(distinct r.student_id) as student_count
+from lab_teachers t
+join experiment_records r on r.teacher_id = t.teacher_id
+group by t.teacher_id
+order by student_count desc, t.teacher_id;
+""",
+            tests=mk_tests(
+                lab_setup(),
+                lab_setup("insert into experiment_records values ('S4', 'E1', 'T1', 90, 81);"),
+                lab_setup("delete from experiment_records where teacher_id = 'T5';"),
+            ),
+        )
+    )
+
+    specs.append(
+        ProblemSpec(
+            slug="review-45-lab-student-summary-view",
+            title="A卷：建立学生实验统计视图 VW1",
+            difficulty="中等",
+            tags=["VIEW", "GROUP BY", "Exam"],
+            statement="""建立视图 `vw1`，统计每个学生的实验信息。
+
+视图必须包含以下列：
+
+| 列名 | 含义 |
+| --- | --- |
+| `student_id` | 学号 |
+| `student_name` | 姓名 |
+| `total_minutes` | 累计实验时长；没有实验记录时为 0 |
+| `avg_score` | 平均成绩，保留两位小数；没有实验记录时为 NULL |
+
+结果不需要在用户 SQL 中查询，只需要创建视图。""",
+            schema="students, experiment_records",
+            solution_sql="""
+create view vw1 as
+select s.student_id,
+       s.student_name,
+       coalesce(sum(r.actual_minutes), 0)::integer as total_minutes,
+       round(avg(r.score), 2)::numeric(10,2) as avg_score
+from students s
+left join experiment_records r on r.student_id = s.student_id
+group by s.student_id, s.student_name;
+""",
+            judge_sql="""
+select student_id, student_name, total_minutes, avg_score
+from vw1
+order by student_id;
+""",
+            tests=mk_tests(
+                lab_setup(),
+                lab_setup("insert into students values ('S5', '小刘', '信安2301', '信安');"),
+                lab_setup("delete from experiment_records where student_id = 'S4';"),
+            ),
+        )
+    )
+
+    by_slug = {spec.slug: spec for spec in specs}
+    missing = [slug for slug in FOCUSED_REVIEW_SLUGS if slug not in by_slug]
+    if missing:
+        raise RuntimeError(f"Focused review slug(s) are missing: {', '.join(missing)}")
+    return [by_slug[slug] for slug in FOCUSED_REVIEW_SLUGS]
 
 
 def write_problem(problem: ProblemSpec) -> None:
@@ -1920,7 +2226,9 @@ def write_readme(specs: list[ProblemSpec]) -> None:
     lines = [
         "# Review 2026 SQL Problem Packages",
         "",
-        "These packages are generated from the exam review scope, `program.md`, and the referenced SPJ/PDF lab materials.",
+        "These packages are the high-priority SQL subset generated from the exam review scope, `program.md`, the referenced SPJ/PDF lab materials, and the 2025 A paper.",
+        "",
+        "Kept topics: JOIN, nested subquery, GROUP BY/HAVING, NOT EXISTS, division-style queries, UPDATE, and VIEW.",
         "",
         "Import zip files from `examples/review-2026/zips/` in the admin page. Each problem has one public sample and two hidden test cases.",
         "",

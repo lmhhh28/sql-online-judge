@@ -5,7 +5,7 @@ from pathlib import PurePosixPath
 from zipfile import BadZipFile, ZipFile
 
 import yaml
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models import Problem, TestCase
@@ -69,6 +69,7 @@ def import_problem_package(db: Session, package_bytes: bytes) -> ImportSummary:
         if problem is None:
             problem = Problem(slug=slug, title=title)
             db.add(problem)
+            db.flush()
 
         problem.title = title
         problem.statement_md = statement_md
@@ -81,7 +82,9 @@ def import_problem_package(db: Session, package_bytes: bytes) -> ImportSummary:
         problem.is_active = bool(metadata.get("is_active", True))
         problem.updated_at = datetime.utcnow()
 
-        problem.test_cases.clear()
+        db.execute(delete(TestCase).where(TestCase.problem_id == problem.id))
+        db.flush()
+
         imported_cases = 0
         for test_dir in _list_test_dirs(zip_file):
             name = test_dir.split("/", 1)[1]

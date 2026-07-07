@@ -89,6 +89,7 @@ class ProblemListItem(BaseModel):
     time_limit_ms: int
     is_active: bool
     created_at: datetime
+    accepted: bool = False
 
     model_config = {"from_attributes": True}
 

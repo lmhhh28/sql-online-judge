@@ -51,7 +51,10 @@ export default function ProblemsPage() {
         {pageItems.map((problem) => (
           <Link className="problem-row" to={`/problems/${problem.slug}`} key={problem.id}>
             <span>
-              <strong>{problem.title}</strong>
+              <span className="problem-title-line">
+                <strong>{problem.title}</strong>
+                {problem.accepted && <span className="accepted-badge">AC</span>}
+              </span>
               <small>{problem.slug}</small>
             </span>
             <span>{problem.difficulty}</span>

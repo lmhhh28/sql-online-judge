@@ -1,0 +1,10 @@
+slug: review-42-lab-overtime-score-update
+title: A卷：超时完成实验扣分
+difficulty: 中等
+tags:
+- UPDATE
+- JOIN
+- Exam
+checker: result
+ordered: true
+time_limit_ms: 3000

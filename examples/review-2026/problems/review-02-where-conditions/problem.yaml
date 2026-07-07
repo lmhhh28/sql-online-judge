@@ -1,8 +1,0 @@
-slug: review-02-where-conditions
-title: WHERE 多条件筛选
-difficulty: 简单
-tags:
-- WHERE
-checker: result
-ordered: true
-time_limit_ms: 3000

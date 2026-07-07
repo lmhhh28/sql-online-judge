@@ -1,0 +1,10 @@
+slug: review-41-lab-students-at-least-two
+title: A卷：至少做过 2 个实验的学生
+difficulty: 简单
+tags:
+- GROUP BY
+- HAVING
+- Exam
+checker: result
+ordered: true
+time_limit_ms: 3000

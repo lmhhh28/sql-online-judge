@@ -1,6 +1,0 @@
-item,ok
-check_exists,True
-credits_default,True
-not_null_count,True
-table_exists,True
-unique_exists,True

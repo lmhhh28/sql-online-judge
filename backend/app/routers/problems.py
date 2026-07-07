@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, get_optional_current_user
 from app.models import Problem, Submission, TestCase, User
 from app.schemas import CodeSubmitRequest, ProblemDetail, ProblemListItem, PublicTestCaseRead, SubmissionRead
 from app.services.judge import judge_submission, submission_to_read
@@ -15,7 +15,35 @@ from app.services.judge import judge_submission, submission_to_read
 router = APIRouter(prefix="/api", tags=["practice"])
 
 
-def problem_to_detail(problem: Problem) -> ProblemDetail:
+def _problem_to_list_item(problem: Problem, accepted: bool = False) -> ProblemListItem:
+    return ProblemListItem(
+        id=problem.id,
+        slug=problem.slug,
+        title=problem.title,
+        difficulty=problem.difficulty,
+        tags=problem.tags,
+        checker=problem.checker,
+        ordered=problem.ordered,
+        time_limit_ms=problem.time_limit_ms,
+        is_active=problem.is_active,
+        created_at=problem.created_at,
+        accepted=accepted,
+    )
+
+
+def _accepted_problem_ids(db: Session, user: Optional[User]) -> set[int]:
+    if user is None:
+        return set()
+    return set(
+        db.scalars(
+            select(Submission.problem_id)
+            .where(Submission.user_id == user.id, Submission.mode == "submit", Submission.status == "AC")
+            .distinct()
+        )
+    )
+
+
+def problem_to_detail(problem: Problem, accepted: bool = False) -> ProblemDetail:
     public_cases = [
         PublicTestCaseRead(
             id=case.id,
@@ -28,35 +56,36 @@ def problem_to_detail(problem: Problem) -> ProblemDetail:
         if not case.is_hidden
     ]
     return ProblemDetail(
-        id=problem.id,
-        slug=problem.slug,
-        title=problem.title,
+        **_problem_to_list_item(problem, accepted).model_dump(),
+        public_cases=public_cases,
         statement_md=problem.statement_md,
         schema_md=problem.schema_md,
-        difficulty=problem.difficulty,
-        tags=problem.tags,
-        checker=problem.checker,
-        ordered=problem.ordered,
-        time_limit_ms=problem.time_limit_ms,
-        is_active=problem.is_active,
-        created_at=problem.created_at,
-        public_cases=public_cases,
     )
 
 
 @router.get("/problems", response_model=list[ProblemListItem])
-def list_problems(db: Session = Depends(get_db)) -> list[Problem]:
-    return list(db.scalars(select(Problem).where(Problem.is_active.is_(True)).order_by(Problem.id)))
+def list_problems(
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+) -> list[ProblemListItem]:
+    problems = list(db.scalars(select(Problem).where(Problem.is_active.is_(True)).order_by(Problem.id)))
+    accepted_ids = _accepted_problem_ids(db, current_user)
+    return [_problem_to_list_item(problem, problem.id in accepted_ids) for problem in problems]
 
 
 @router.get("/problems/{slug}", response_model=ProblemDetail)
-def get_problem(slug: str, db: Session = Depends(get_db)) -> ProblemDetail:
+def get_problem(
+    slug: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+) -> ProblemDetail:
     problem = db.scalar(
         select(Problem).options(selectinload(Problem.test_cases)).where(Problem.slug == slug, Problem.is_active.is_(True))
     )
     if problem is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found")
-    return problem_to_detail(problem)
+    accepted_ids = _accepted_problem_ids(db, current_user)
+    return problem_to_detail(problem, problem.id in accepted_ids)
 
 
 def _create_submission(

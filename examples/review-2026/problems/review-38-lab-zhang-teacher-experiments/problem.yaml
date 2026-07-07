@@ -1,0 +1,9 @@
+slug: review-38-lab-zhang-teacher-experiments
+title: A卷：查询张sir带过的实验名称
+difficulty: 简单
+tags:
+- JOIN
+- Exam
+checker: result
+ordered: true
+time_limit_ms: 3000

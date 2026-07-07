@@ -1,0 +1,10 @@
+slug: review-44-lab-teacher-student-count
+title: A卷：统计每个实验师带过的学生人数
+difficulty: 中等
+tags:
+- GROUP BY
+- JOIN
+- Exam
+checker: result
+ordered: true
+time_limit_ms: 3000

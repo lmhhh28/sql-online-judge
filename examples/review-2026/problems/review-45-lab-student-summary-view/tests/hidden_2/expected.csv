@@ -1,0 +1,5 @@
+student_id,student_name,total_minutes,avg_score
+S1,小王,390,86.00
+S2,小李,326,73.33
+S3,小周,210,64.50
+S4,小陈,0,\N

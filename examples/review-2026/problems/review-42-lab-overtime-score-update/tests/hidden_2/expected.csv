@@ -1,0 +1,11 @@
+student_id,experiment_id,teacher_id,actual_minutes,score
+S1,E1,T1,90,85
+S1,E2,T1,120,80
+S1,E3,T2,100,91
+S1,E5,T1,60,88
+S2,E2,T2,120,76
+S2,E3,T2,100,60
+S2,E5,T2,60,84
+S3,E2,T5,120,59
+S3,E4,T1,80,70
+S4,E5,T5,60,92

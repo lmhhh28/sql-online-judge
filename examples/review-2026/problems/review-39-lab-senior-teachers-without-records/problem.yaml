@@ -1,0 +1,10 @@
+slug: review-39-lab-senior-teachers-without-records
+title: A卷：没有带过实验课的高工
+difficulty: 中等
+tags:
+- NOT EXISTS
+- Subquery
+- Exam
+checker: result
+ordered: true
+time_limit_ms: 3000

@@ -1,8 +1,0 @@
-slug: review-05-order-by-employees
-title: ORDER BY 多列排序
-difficulty: 简单
-tags:
-- ORDER BY
-checker: result
-ordered: true
-time_limit_ms: 3000

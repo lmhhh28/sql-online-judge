@@ -1,0 +1,11 @@
+slug: review-40-lab-teachers-all-category-c
+title: A卷：指导过全部 C 类实验的实验师
+difficulty: 困难
+tags:
+- Division
+- NOT EXISTS
+- Subquery
+- Exam
+checker: result
+ordered: true
+time_limit_ms: 3000

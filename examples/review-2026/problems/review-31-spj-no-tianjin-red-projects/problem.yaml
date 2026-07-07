@@ -4,6 +4,7 @@ difficulty: 困难
 tags:
 - SPJ
 - Subquery
+- NOT EXISTS
 - PDF
 checker: result
 ordered: true

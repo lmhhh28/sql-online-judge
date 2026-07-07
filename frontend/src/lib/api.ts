@@ -21,6 +21,7 @@ export type Problem = {
   time_limit_ms: number;
   is_active: boolean;
   created_at: string;
+  accepted: boolean;
   public_cases?: PublicTestCase[];
 };
 
@@ -133,4 +134,3 @@ export const api = {
   },
   adminSubmissions: () => apiFetch<Submission[]>("/api/admin/submissions")
 };
-

@@ -1,0 +1,10 @@
+slug: review-45-lab-student-summary-view
+title: A卷：建立学生实验统计视图 VW1
+difficulty: 中等
+tags:
+- VIEW
+- GROUP BY
+- Exam
+checker: result
+ordered: true
+time_limit_ms: 3000

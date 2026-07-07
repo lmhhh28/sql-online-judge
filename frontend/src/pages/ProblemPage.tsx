@@ -37,6 +37,10 @@ export default function ProblemPage() {
     const fresh = await api.submission(id);
     setActiveSubmission(fresh);
     queryClient.invalidateQueries({ queryKey: ["submissions", slug] });
+    if (fresh.mode === "submit" && fresh.status === "AC") {
+      queryClient.invalidateQueries({ queryKey: ["problems"] });
+      queryClient.invalidateQueries({ queryKey: ["problem", slug] });
+    }
     return fresh;
   };
 
@@ -70,7 +74,10 @@ export default function ProblemPage() {
       <section className="statement-pane">
         <div className="statement-header">
           <div>
-            <h1>{problem?.title ?? "加载中"}</h1>
+            <div className="title-with-status">
+              <h1>{problem?.title ?? "加载中"}</h1>
+              {problem?.accepted && <span className="accepted-badge">AC</span>}
+            </div>
             <p>{problem?.slug}</p>
           </div>
           {problem && <span className="difficulty">{problem.difficulty}</span>}
@@ -102,7 +109,13 @@ export default function ProblemPage() {
             value={code}
             onChange={(value) => setCode(value ?? "")}
             onMount={(_editor, monaco) => setMonacoInstance(monaco)}
-            options={{ minimap: { enabled: false }, fontSize: 14, scrollBeyondLastLine: false }}
+            options={{
+              acceptSuggestionOnEnter: "off",
+              minimap: { enabled: false },
+              fontSize: 14,
+              scrollBeyondLastLine: false,
+              tabCompletion: "on"
+            }}
           />
         </div>
         <section className="result-pane">
