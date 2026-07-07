@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 import psycopg
 import yaml
@@ -1857,7 +1857,10 @@ def write_problem(problem: ProblemSpec) -> None:
     with ZipFile(zip_path, "w", compression=ZIP_DEFLATED) as zf:
         for path in sorted(problem_dir.rglob("*")):
             if path.is_file():
-                zf.write(path, path.relative_to(problem_dir))
+                arcname = path.relative_to(problem_dir).as_posix()
+                info = ZipInfo(arcname, date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = ZIP_DEFLATED
+                zf.writestr(info, path.read_bytes())
 
 
 def write_readme(specs: list[ProblemSpec]) -> None:
