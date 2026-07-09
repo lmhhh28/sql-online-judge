@@ -1,0 +1,10 @@
+slug: review-48-lab-not-exists-no-b-experiment
+title: NOT EXISTS：没有做过 B 类实验的学生
+difficulty: 中等
+tags:
+- NOT EXISTS
+- Subquery
+- Exam
+checker: result
+ordered: true
+time_limit_ms: 3000

@@ -2,7 +2,7 @@
 
 These packages are the high-priority SQL subset generated from the exam review scope, `program.md`, the referenced SPJ/PDF lab materials, and the 2025 A paper.
 
-Kept topics: JOIN, nested subquery, GROUP BY/HAVING, NOT EXISTS, division-style queries, UPDATE, and VIEW.
+Kept topics: JOIN, nested subquery, GROUP BY/HAVING, EXISTS, NOT EXISTS, IN/NOT IN, division-style queries, UPDATE, and VIEW.
 
 Import zip files from `examples/review-2026/zips/` in the admin page. Each problem has one public sample and two hidden test cases.
 
@@ -30,3 +30,8 @@ Import zip files from `examples/review-2026/zips/` in the admin page. Each probl
 | 20 | `review-43-lab-lowest-score-records` | A卷：查询最低成绩实验记录 | Subquery, Exam |
 | 21 | `review-44-lab-teacher-student-count` | A卷：统计每个实验师带过的学生人数 | GROUP BY, JOIN, Exam |
 | 22 | `review-45-lab-student-summary-view` | A卷：建立学生实验统计视图 VW1 | VIEW, GROUP BY, Exam |
+| 23 | `review-46-spj-exists-heavy-red-suppliers` | EXISTS：供应过大批量红色零件的供应商 | EXISTS, SPJ, Subquery |
+| 24 | `review-47-spj-in-red-part-suppliers` | IN：供应过红色零件的供应商 | IN, SPJ, Subquery |
+| 25 | `review-48-lab-not-exists-no-b-experiment` | NOT EXISTS：没有做过 B 类实验的学生 | NOT EXISTS, Subquery, Exam |
+| 26 | `review-49-spj-not-in-no-tianjin-supplier-projects` | NOT IN：没有使用天津供应商的工程 | NOT IN, SPJ, Subquery |
+| 27 | `review-50-lab-division-students-all-c` | 除法思想：完成全部 C 类实验的学生 | Division, NOT EXISTS, Subquery, Exam |

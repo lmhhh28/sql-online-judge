@@ -47,6 +47,11 @@ FOCUSED_REVIEW_SLUGS = [
     "review-43-lab-lowest-score-records",
     "review-44-lab-teacher-student-count",
     "review-45-lab-student-summary-view",
+    "review-46-spj-exists-heavy-red-suppliers",
+    "review-47-spj-in-red-part-suppliers",
+    "review-48-lab-not-exists-no-b-experiment",
+    "review-49-spj-not-in-no-tianjin-supplier-projects",
+    "review-50-lab-division-students-all-c",
 ]
 
 
@@ -2176,6 +2181,176 @@ order by student_id;
         )
     )
 
+    specs.append(
+        ProblemSpec(
+            slug="review-46-spj-exists-heavy-red-suppliers",
+            title="EXISTS：供应过大批量红色零件的供应商",
+            difficulty="中等",
+            tags=["EXISTS", "SPJ", "Subquery"],
+            statement="""基于 SPJ 数据库，查询至少供应过一次红色零件且供应数量不少于 200 的供应商。
+
+建议使用 `EXISTS` 相关子查询。
+
+输出 `sno,sname`，按 `sno` 升序。""",
+            schema="s(sno,sname,status,city), p(pno,pname,color,weight), spj(sno,pno,jno,qty)",
+            solution_sql="""
+select s.sno, s.sname
+from s
+where exists (
+  select 1
+  from spj
+  join p on p.pno = spj.pno
+  where spj.sno = s.sno
+    and p.color = '红'
+    and spj.qty >= 200
+)
+order by s.sno;
+""",
+            tests=mk_tests(
+                spj_setup(),
+                spj_setup("insert into spj values ('S2', 'P4', 'J2', 250);"),
+                spj_setup("delete from spj where sno in ('S1', 'S4', 'S5') and pno in ('P1', 'P6');"),
+            ),
+        )
+    )
+
+    specs.append(
+        ProblemSpec(
+            slug="review-47-spj-in-red-part-suppliers",
+            title="IN：供应过红色零件的供应商",
+            difficulty="简单",
+            tags=["IN", "SPJ", "Subquery"],
+            statement="""基于 SPJ 数据库，查询供应过任意红色零件的供应商编号。
+
+建议使用 `IN` 子查询：先找出红色零件号，再匹配供应情况。
+
+输出 `sno`，去重后按 `sno` 升序。""",
+            schema="p(pno,pname,color,weight), spj(sno,pno,jno,qty)",
+            solution_sql="""
+select distinct sno
+from spj
+where pno in (
+  select pno
+  from p
+  where color = '红'
+)
+order by sno;
+""",
+            tests=mk_tests(
+                spj_setup(),
+                spj_setup("insert into spj values ('S2', 'P4', 'J2', 250);"),
+                spj_setup("update p set color = '绿' where pno in ('P1', 'P6');"),
+            ),
+        )
+    )
+
+    specs.append(
+        ProblemSpec(
+            slug="review-48-lab-not-exists-no-b-experiment",
+            title="NOT EXISTS：没有做过 B 类实验的学生",
+            difficulty="中等",
+            tags=["NOT EXISTS", "Subquery", "Exam"],
+            statement="""实验管理数据库包含实验师、学生、实验、实验记录四张表。
+
+查询没有做过任何 `B类` 实验的学生。
+
+建议使用 `NOT EXISTS`，注意学生没有实验记录时也应视为“没有做过 B 类实验”。
+
+输出 `student_id,student_name`，按 `student_id` 升序。""",
+            schema="students, experiments, experiment_records",
+            solution_sql="""
+select s.student_id, s.student_name
+from students s
+where not exists (
+  select 1
+  from experiment_records r
+  join experiments e on e.experiment_id = r.experiment_id
+  where r.student_id = s.student_id
+    and e.category = 'B类'
+)
+order by s.student_id;
+""",
+            tests=mk_tests(
+                lab_setup(),
+                lab_setup("insert into experiment_records values ('S4', 'E4', 'T3', 90, 82);"),
+                lab_setup("delete from experiment_records where student_id = 'S3' and experiment_id = 'E4';"),
+            ),
+        )
+    )
+
+    specs.append(
+        ProblemSpec(
+            slug="review-49-spj-not-in-no-tianjin-supplier-projects",
+            title="NOT IN：没有使用天津供应商的工程",
+            difficulty="中等",
+            tags=["NOT IN", "SPJ", "Subquery"],
+            statement="""基于 SPJ 数据库，查询没有使用过天津供应商供货的工程。
+
+建议使用 `NOT IN` 子查询。没有任何供货记录的工程也应输出。
+
+输出 `jno,jname`，按 `jno` 升序。""",
+            schema="s(sno,sname,status,city), j(jno,jname,city), spj(sno,pno,jno,qty)",
+            solution_sql="""
+select j.jno, j.jname
+from j
+where j.jno not in (
+  select spj.jno
+  from spj
+  join s on s.sno = spj.sno
+  where s.city = '天津'
+)
+order by j.jno;
+""",
+            tests=mk_tests(
+                spj_setup(),
+                spj_setup("insert into spj values ('S1', 'P1', 'J5', 20);"),
+                spj_setup("update s set city = '北京' where sno = 'S1';"),
+            ),
+        )
+    )
+
+    specs.append(
+        ProblemSpec(
+            slug="review-50-lab-division-students-all-c",
+            title="除法思想：完成全部 C 类实验的学生",
+            difficulty="困难",
+            tags=["Division", "NOT EXISTS", "Subquery", "Exam"],
+            statement="""查询完成过全部 `C类` 实验的学生。
+
+这是典型“除法思想”题：对每个学生，不能存在某个 `C类` 实验是他没有完成记录的。
+
+输出 `student_id,student_name`，按 `student_id` 升序。""",
+            schema="students, experiments, experiment_records",
+            solution_sql="""
+select s.student_id, s.student_name
+from students s
+where not exists (
+  select 1
+  from experiments e
+  where e.category = 'C类'
+    and not exists (
+      select 1
+      from experiment_records r
+      where r.student_id = s.student_id
+        and r.experiment_id = e.experiment_id
+    )
+)
+order by s.student_id;
+""",
+            tests=mk_tests(
+                lab_setup(),
+                lab_setup(
+                    """
+insert into experiment_records values
+  ('S4', 'E2', 'T2', 110, 80),
+  ('S4', 'E3', 'T2', 90, 83);
+"""
+                ),
+                lab_setup("delete from experiment_records where student_id = 'S1' and experiment_id = 'E3';"),
+            ),
+        )
+    )
+
     by_slug = {spec.slug: spec for spec in specs}
     missing = [slug for slug in FOCUSED_REVIEW_SLUGS if slug not in by_slug]
     if missing:
@@ -2228,7 +2403,7 @@ def write_readme(specs: list[ProblemSpec]) -> None:
         "",
         "These packages are the high-priority SQL subset generated from the exam review scope, `program.md`, the referenced SPJ/PDF lab materials, and the 2025 A paper.",
         "",
-        "Kept topics: JOIN, nested subquery, GROUP BY/HAVING, NOT EXISTS, division-style queries, UPDATE, and VIEW.",
+        "Kept topics: JOIN, nested subquery, GROUP BY/HAVING, EXISTS, NOT EXISTS, IN/NOT IN, division-style queries, UPDATE, and VIEW.",
         "",
         "Import zip files from `examples/review-2026/zips/` in the admin page. Each problem has one public sample and two hidden test cases.",
         "",

@@ -1,0 +1,10 @@
+slug: review-46-spj-exists-heavy-red-suppliers
+title: EXISTS：供应过大批量红色零件的供应商
+difficulty: 中等
+tags:
+- EXISTS
+- SPJ
+- Subquery
+checker: result
+ordered: true
+time_limit_ms: 3000

@@ -1,0 +1,10 @@
+slug: review-49-spj-not-in-no-tianjin-supplier-projects
+title: NOT IN：没有使用天津供应商的工程
+difficulty: 中等
+tags:
+- NOT IN
+- SPJ
+- Subquery
+checker: result
+ordered: true
+time_limit_ms: 3000

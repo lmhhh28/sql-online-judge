@@ -1,0 +1,10 @@
+slug: review-47-spj-in-red-part-suppliers
+title: IN：供应过红色零件的供应商
+difficulty: 简单
+tags:
+- IN
+- SPJ
+- Subquery
+checker: result
+ordered: true
+time_limit_ms: 3000
