@@ -6,6 +6,20 @@ Kept topics: JOIN, nested subquery, GROUP BY/HAVING, EXISTS, NOT EXISTS, IN/NOT 
 
 Import zip files from `examples/review-2026/zips/` in the admin page. Each problem has one public sample and two hidden test cases.
 
+## Regenerating
+
+Run the generator from the repository root with the backend environment active:
+
+```bash
+source backend/.venv/bin/activate
+export ADMIN_DATABASE_URL='postgresql:///postgres?host=/tmp'
+python tools/generate_review_problems.py
+```
+
+The script reads `ADMIN_DATABASE_URL` from the process environment (it does not load the repository `.env`), creates and drops random `oj_pkg_*` databases, and replaces the entire `examples/review-2026/` directory only after every package has been generated successfully. Back up any manual edits before running it. The configured database role must be allowed to create, terminate connections to, and drop those temporary databases.
+
+Replacing an existing output uses the operating system's atomic directory exchange on macOS or Linux. If that operation is unavailable or fails, the old output remains in place and the completed hidden staging directory is retained; the generator never falls back to a non-atomic two-step replacement.
+
 | # | Slug | Title | Tags |
 | --- | --- | --- | --- |
 | 1 | `review-09-having-customers` | HAVING 分组筛选 | GROUP BY, HAVING |

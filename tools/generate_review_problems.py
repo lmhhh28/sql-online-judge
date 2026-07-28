@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import ctypes
+import errno
 import io
 import os
 import re
@@ -19,10 +21,16 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "examples" / "review-2026"
-PROBLEMS_DIR = OUTPUT / "problems"
-ZIPS_DIR = OUTPUT / "zips"
 NULL_MARKER = r"\N"
 USER_OUTPUT_SENTINEL = "__USER_OUTPUT__"
+TEMP_DATABASE_PATTERN = re.compile(r"oj_pkg_[0-9a-f]{20}\Z")
+DATABASE_CONNECT_TIMEOUT_SECONDS = 5
+FORBIDDEN_LIBPQ_ENVIRONMENT = ("PGSERVICE", "PGSERVICEFILE", "PGOPTIONS")
+
+
+class DatabaseCreationOutcomeUnknown(RuntimeError):
+    """CREATE DATABASE was sent, but no definitive server result was received."""
+
 
 FOCUSED_REVIEW_SLUGS = [
     "review-09-having-customers",
@@ -91,12 +99,25 @@ def psycopg_url(url: str) -> str:
 
 
 def admin_conninfo(database: str | None = None) -> str:
-    url = os.environ.get("ADMIN_DATABASE_URL", "postgresql://lmhhh@/postgres?host=/tmp")
-    conninfo = psycopg_url(url)
-    if database is None:
-        return conninfo
-    params = conninfo_to_dict(conninfo)
-    params["dbname"] = database
+    unsafe_environment = [
+        variable for variable in FORBIDDEN_LIBPQ_ENVIRONMENT if os.environ.get(variable)
+    ]
+    if unsafe_environment:
+        raise RuntimeError(
+            "Unsafe libpq environment variables are set: "
+            + ", ".join(unsafe_environment)
+        )
+    url = os.environ.get("ADMIN_DATABASE_URL", "postgresql:///postgres?host=/tmp")
+    params = conninfo_to_dict(psycopg_url(url))
+    if any(parameter in params for parameter in ("service", "servicefile", "options")):
+        raise RuntimeError(
+            "ADMIN_DATABASE_URL must not use service, servicefile, or startup options"
+        )
+    if database is not None:
+        params["dbname"] = database
+    if not params.get("dbname"):
+        raise RuntimeError("ADMIN_DATABASE_URL must include a database name")
+    params["connect_timeout"] = str(DATABASE_CONNECT_TIMEOUT_SECONDS)
     return make_conninfo(**params)
 
 
@@ -129,7 +150,9 @@ def _split_top_level_commas(text: str) -> list[str]:
 
 def derive_schema_ddl(setup_sql: str) -> str:
     statements: list[str] = []
-    pattern = re.compile(r"create\s+table\s+(?:if\s+not\s+exists\s+)?([a-zA-Z_]\w*)\s*\(", re.IGNORECASE)
+    pattern = re.compile(
+        r"create\s+table\s+(?:if\s+not\s+exists\s+)?([a-zA-Z_]\w*)\s*\(", re.IGNORECASE
+    )
     for m in pattern.finditer(setup_sql):
         table_name = m.group(1)
         start = m.end() - 1
@@ -149,27 +172,72 @@ def derive_schema_ddl(setup_sql: str) -> str:
         cols = [c.strip() for c in _split_top_level_commas(inner) if c.strip()]
         if not cols:
             continue
-        statements.append(f"create table {table_name} (\n  " + ",\n  ".join(cols) + "\n);")
+        statements.append(
+            f"create table {table_name} (\n  " + ",\n  ".join(cols) + "\n);"
+        )
     if not statements:
         return ""
     return "```sql\n" + "\n\n".join(statements) + "\n```"
 
 
 def create_database(db_name: str) -> None:
-    with psycopg.connect(admin_conninfo(), autocommit=True) as conn:
-        conn.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(db_name)))
+    if TEMP_DATABASE_PATTERN.fullmatch(db_name) is None:
+        raise ValueError(
+            "Refusing to create a database outside the package-generator namespace"
+        )
+    connection_info = admin_conninfo()
+    statement = sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(
+        sql.Identifier(db_name)
+    )
+    statement_started = False
+    statement_returned = False
+    try:
+        with psycopg.connect(connection_info, autocommit=True) as conn:
+            statement_started = True
+            conn.execute(statement)
+            statement_returned = True
+    except BaseException as exc:
+        # Before execute, no CREATE was sent. A psycopg error carrying SQLSTATE
+        # is also a definitive server rejection, so the database was not
+        # created. Only a post-send transport/protocol failure is ambiguous.
+        if not statement_started or (
+            not statement_returned
+            and isinstance(exc, psycopg.Error)
+            and exc.sqlstate is not None
+        ):
+            raise
+        raise DatabaseCreationOutcomeUnknown(
+            f"CREATE DATABASE {db_name} may have succeeded before the connection failed"
+        ) from exc
 
 
 def drop_database(db_name: str) -> None:
+    if TEMP_DATABASE_PATTERN.fullmatch(db_name) is None:
+        raise ValueError(
+            "Refusing to drop a database outside the package-generator namespace"
+        )
     with psycopg.connect(admin_conninfo(), autocommit=True) as conn:
-        conn.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s", (db_name,))
-        conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(db_name)))
+        conn.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
+            (db_name,),
+        )
+        conn.execute(
+            sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                sql.Identifier(db_name)
+            )
+        )
 
 
 def expected_output(problem: ProblemSpec, test: TestSpec) -> str:
     db_name = f"oj_pkg_{uuid.uuid4().hex[:20]}"
-    create_database(db_name)
+    generation_error: BaseException | None = None
+    cleanup_database = False
     try:
+        # create_database distinguishes a definitive server rejection from a
+        # transport failure whose CREATE result is unknown. Only the latter
+        # enters the compensating DROP IF EXISTS path when creation raises.
+        create_database(db_name)
+        cleanup_database = True
         with psycopg.connect(admin_conninfo(db_name), autocommit=True) as conn:
             if test.setup_sql.strip():
                 conn.execute(test.setup_sql)
@@ -182,13 +250,29 @@ def expected_output(problem: ProblemSpec, test: TestSpec) -> str:
                     if cursor.description:
                         result_sets.append(fetch_csv(cursor))
                 if len(result_sets) != 1:
-                    raise RuntimeError(f"{problem.slug}/{test.name} solution must return exactly one result set")
+                    raise RuntimeError(
+                        f"{problem.slug}/{test.name} solution must return exactly one result set"
+                    )
                 return result_sets[0]
 
             cursor = conn.execute(problem.judge_sql)
             return fetch_csv(cursor)
+    except BaseException as exc:
+        generation_error = exc
+        if isinstance(exc, DatabaseCreationOutcomeUnknown):
+            cleanup_database = True
+        raise
     finally:
-        drop_database(db_name)
+        if cleanup_database:
+            try:
+                drop_database(db_name)
+            except Exception as cleanup_error:
+                if generation_error is None:
+                    raise
+                print(
+                    f"warning: failed to drop temporary database {db_name}: {cleanup_error}",
+                    file=sys.stderr,
+                )
 
 
 def test_name(index: int) -> str:
@@ -200,6 +284,7 @@ def emp_schema(*tables: str) -> str:
 
 
 def spj_setup(extra_sql: str = "") -> str:
+    # `extra_sql` is supplied only by the static problem specifications below.
     return f"""
 create table s (
   sno text primary key,
@@ -275,10 +360,11 @@ insert into spj(sno, pno, jno, qty) values
   ('S5', 'P6', 'J4', 500);
 
 {extra_sql}
-"""
+"""  # nosec B608
 
 
 def lab_setup(extra_sql: str = "") -> str:
+    # `extra_sql` is supplied only by the static problem specifications below.
     return f"""
 create table lab_teachers (
   teacher_id text primary key,
@@ -343,7 +429,7 @@ insert into experiment_records values
   ('S4', 'E5', 'T5', 55, 92);
 
 {extra_sql}
-"""
+"""  # nosec B608
 
 
 def mk_tests(*setups: str) -> list[TestSpec]:
@@ -1657,7 +1743,9 @@ order by spj.sno;
 """,
             tests=mk_tests(
                 spj_setup(),
-                spj_setup("insert into spj values ('S4','P1','J1',50) on conflict do nothing;"),
+                spj_setup(
+                    "insert into spj values ('S4','P1','J1',50) on conflict do nothing;"
+                ),
                 spj_setup("update p set color = '绿' where pno = 'P1';"),
             ),
         )
@@ -1687,7 +1775,9 @@ order by j.jno;
 """,
             tests=mk_tests(
                 spj_setup(),
-                spj_setup("delete from spj where sno = 'S1' and pno = 'P1' and jno = 'J3';"),
+                spj_setup(
+                    "delete from spj where sno = 'S1' and pno = 'P1' and jno = 'J3';"
+                ),
                 spj_setup("update s set city = '北京' where sno = 'S4';"),
             ),
         )
@@ -1720,8 +1810,12 @@ order by candidate.jno;
 """,
             tests=mk_tests(
                 spj_setup(),
-                spj_setup("insert into spj values ('S3','P2','J1',10) on conflict do nothing;"),
-                spj_setup("delete from spj where sno = 'S5' and pno = 'P2' and jno = 'J4';"),
+                spj_setup(
+                    "insert into spj values ('S3','P2','J1',10) on conflict do nothing;"
+                ),
+                spj_setup(
+                    "delete from spj where sno = 'S5' and pno = 'P2' and jno = 'J4';"
+                ),
             ),
         )
     )
@@ -1758,7 +1852,9 @@ order by section, key, value;
 """,
             tests=mk_tests(
                 spj_setup(),
-                spj_setup("insert into spj values ('S1','P2','J1',25) on conflict do nothing;"),
+                spj_setup(
+                    "insert into spj values ('S1','P2','J1',25) on conflict do nothing;"
+                ),
                 spj_setup("update j set jname = '三建' where jno = 'J2';"),
             ),
         )
@@ -1959,7 +2055,9 @@ insert into students values ('S5', '小刘', '信安2301', '信安');
 insert into experiment_records values ('S5', 'E3', 'T1', 100, 99);
 """
                 ),
-                lab_setup("delete from experiment_records where teacher_id = 'T1' and experiment_id = 'E4';"),
+                lab_setup(
+                    "delete from experiment_records where teacher_id = 'T1' and experiment_id = 'E4';"
+                ),
             ),
         )
     )
@@ -1987,7 +2085,9 @@ order by t.teacher_id;
 """,
             tests=mk_tests(
                 lab_setup(),
-                lab_setup("insert into experiment_records values ('S4', 'E4', 'T3', 80, 86);"),
+                lab_setup(
+                    "insert into experiment_records values ('S4', 'E4', 'T3', 80, 86);"
+                ),
                 lab_setup("delete from experiment_records where teacher_id = 'T1';"),
             ),
         )
@@ -2029,7 +2129,9 @@ insert into students values ('S5', '小刘', '信安2301', '信安');
 insert into experiment_records values ('S5', 'E3', 'T5', 100, 90);
 """
                 ),
-                lab_setup("delete from experiment_records where teacher_id = 'T2' and experiment_id = 'E3';"),
+                lab_setup(
+                    "delete from experiment_records where teacher_id = 'T2' and experiment_id = 'E3';"
+                ),
             ),
         )
     )
@@ -2053,8 +2155,12 @@ order by student_id;
 """,
             tests=mk_tests(
                 lab_setup(),
-                lab_setup("insert into experiment_records values ('S4', 'E1', 'T3', 90, 82);"),
-                lab_setup("delete from experiment_records where student_id = 'S3' and experiment_id = 'E4';"),
+                lab_setup(
+                    "insert into experiment_records values ('S4', 'E1', 'T3', 90, 82);"
+                ),
+                lab_setup(
+                    "delete from experiment_records where student_id = 'S3' and experiment_id = 'E4';"
+                ),
             ),
         )
     )
@@ -2083,8 +2189,12 @@ order by student_id, experiment_id;
 """,
             tests=mk_tests(
                 lab_setup(),
-                lab_setup("update experiment_records set actual_minutes = 61, score = 100 where student_id = 'S4' and experiment_id = 'E5';"),
-                lab_setup("update experiment_records set actual_minutes = experiments.required_minutes from experiments where experiments.experiment_id = experiment_records.experiment_id;"),
+                lab_setup(
+                    "update experiment_records set actual_minutes = 61, score = 100 where student_id = 'S4' and experiment_id = 'E5';"
+                ),
+                lab_setup(
+                    "update experiment_records set actual_minutes = experiments.required_minutes from experiments where experiments.experiment_id = experiment_records.experiment_id;"
+                ),
             ),
         )
     )
@@ -2107,8 +2217,12 @@ order by student_id, experiment_id;
 """,
             tests=mk_tests(
                 lab_setup(),
-                lab_setup("update experiment_records set score = 59 where student_id = 'S2' and experiment_id = 'E3';"),
-                lab_setup("update experiment_records set score = 100 where student_id = 'S3' and experiment_id = 'E2';"),
+                lab_setup(
+                    "update experiment_records set score = 59 where student_id = 'S2' and experiment_id = 'E3';"
+                ),
+                lab_setup(
+                    "update experiment_records set score = 100 where student_id = 'S3' and experiment_id = 'E2';"
+                ),
             ),
         )
     )
@@ -2133,7 +2247,9 @@ order by student_count desc, t.teacher_id;
 """,
             tests=mk_tests(
                 lab_setup(),
-                lab_setup("insert into experiment_records values ('S4', 'E1', 'T1', 90, 81);"),
+                lab_setup(
+                    "insert into experiment_records values ('S4', 'E1', 'T1', 90, 81);"
+                ),
                 lab_setup("delete from experiment_records where teacher_id = 'T5';"),
             ),
         )
@@ -2175,7 +2291,9 @@ order by student_id;
 """,
             tests=mk_tests(
                 lab_setup(),
-                lab_setup("insert into students values ('S5', '小刘', '信安2301', '信安');"),
+                lab_setup(
+                    "insert into students values ('S5', '小刘', '信安2301', '信安');"
+                ),
                 lab_setup("delete from experiment_records where student_id = 'S4';"),
             ),
         )
@@ -2209,7 +2327,9 @@ order by s.sno;
             tests=mk_tests(
                 spj_setup(),
                 spj_setup("insert into spj values ('S2', 'P4', 'J2', 250);"),
-                spj_setup("delete from spj where sno in ('S1', 'S4', 'S5') and pno in ('P1', 'P6');"),
+                spj_setup(
+                    "delete from spj where sno in ('S1', 'S4', 'S5') and pno in ('P1', 'P6');"
+                ),
             ),
         )
     )
@@ -2272,8 +2392,12 @@ order by s.student_id;
 """,
             tests=mk_tests(
                 lab_setup(),
-                lab_setup("insert into experiment_records values ('S4', 'E4', 'T3', 90, 82);"),
-                lab_setup("delete from experiment_records where student_id = 'S3' and experiment_id = 'E4';"),
+                lab_setup(
+                    "insert into experiment_records values ('S4', 'E4', 'T3', 90, 82);"
+                ),
+                lab_setup(
+                    "delete from experiment_records where student_id = 'S3' and experiment_id = 'E4';"
+                ),
             ),
         )
     )
@@ -2346,7 +2470,9 @@ insert into experiment_records values
   ('S4', 'E3', 'T2', 90, 83);
 """
                 ),
-                lab_setup("delete from experiment_records where student_id = 'S1' and experiment_id = 'E3';"),
+                lab_setup(
+                    "delete from experiment_records where student_id = 'S1' and experiment_id = 'E3';"
+                ),
             ),
         )
     )
@@ -2358,8 +2484,8 @@ insert into experiment_records values
     return [by_slug[slug] for slug in FOCUSED_REVIEW_SLUGS]
 
 
-def write_problem(problem: ProblemSpec) -> None:
-    problem_dir = PROBLEMS_DIR / problem.slug
+def write_problem(problem: ProblemSpec, output: Path = OUTPUT) -> None:
+    problem_dir = output / "problems" / problem.slug
     if problem_dir.exists():
         shutil.rmtree(problem_dir)
     (problem_dir / "tests").mkdir(parents=True)
@@ -2373,8 +2499,12 @@ def write_problem(problem: ProblemSpec) -> None:
         "ordered": problem.ordered,
         "time_limit_ms": problem.time_limit_ms,
     }
-    (problem_dir / "problem.yaml").write_text(yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    (problem_dir / "statement.md").write_text(problem.statement.strip() + "\n", encoding="utf-8")
+    (problem_dir / "problem.yaml").write_text(
+        yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    (problem_dir / "statement.md").write_text(
+        problem.statement.strip() + "\n", encoding="utf-8"
+    )
     schema_md = derive_schema_ddl(problem.tests[0].setup_sql) if problem.tests else ""
     if not schema_md:
         schema_md = problem.schema.strip()
@@ -2383,11 +2513,17 @@ def write_problem(problem: ProblemSpec) -> None:
     for test in problem.tests:
         test_dir = problem_dir / "tests" / test.name
         test_dir.mkdir()
-        (test_dir / "setup.sql").write_text(test.setup_sql.strip() + "\n", encoding="utf-8")
-        (test_dir / "judge.sql").write_text(problem.judge_sql.strip() + "\n", encoding="utf-8")
-        (test_dir / "expected.csv").write_text(expected_output(problem, test), encoding="utf-8")
+        (test_dir / "setup.sql").write_text(
+            test.setup_sql.strip() + "\n", encoding="utf-8"
+        )
+        (test_dir / "judge.sql").write_text(
+            problem.judge_sql.strip() + "\n", encoding="utf-8"
+        )
+        (test_dir / "expected.csv").write_text(
+            expected_output(problem, test), encoding="utf-8"
+        )
 
-    zip_path = ZIPS_DIR / f"{problem.slug}.zip"
+    zip_path = output / "zips" / f"{problem.slug}.zip"
     with ZipFile(zip_path, "w", compression=ZIP_DEFLATED) as zf:
         for path in sorted(problem_dir.rglob("*")):
             if path.is_file():
@@ -2397,7 +2533,7 @@ def write_problem(problem: ProblemSpec) -> None:
                 zf.writestr(info, path.read_bytes())
 
 
-def write_readme(specs: list[ProblemSpec]) -> None:
+def write_readme(specs: list[ProblemSpec], output: Path = OUTPUT) -> None:
     lines = [
         "# Review 2026 SQL Problem Packages",
         "",
@@ -2407,25 +2543,173 @@ def write_readme(specs: list[ProblemSpec]) -> None:
         "",
         "Import zip files from `examples/review-2026/zips/` in the admin page. Each problem has one public sample and two hidden test cases.",
         "",
+        "## Regenerating",
+        "",
+        "Run the generator from the repository root with the backend environment active:",
+        "",
+        "```bash",
+        "source backend/.venv/bin/activate",
+        "export ADMIN_DATABASE_URL='postgresql:///postgres?host=/tmp'",
+        "python tools/generate_review_problems.py",
+        "```",
+        "",
+        "The script reads `ADMIN_DATABASE_URL` from the process environment (it does not load the repository `.env`), creates and drops random `oj_pkg_*` databases, and replaces the entire `examples/review-2026/` directory only after every package has been generated successfully. Back up any manual edits before running it. The configured database role must be allowed to create, terminate connections to, and drop those temporary databases.",
+        "",
+        "Replacing an existing output uses the operating system's atomic directory exchange on macOS or Linux. If that operation is unavailable or fails, the old output remains in place and the completed hidden staging directory is retained; the generator never falls back to a non-atomic two-step replacement.",
+        "",
         "| # | Slug | Title | Tags |",
         "| --- | --- | --- | --- |",
     ]
     for index, spec in enumerate(specs, start=1):
-        lines.append(f"| {index} | `{spec.slug}` | {spec.title} | {', '.join(spec.tags)} |")
-    (OUTPUT / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        lines.append(
+            f"| {index} | `{spec.slug}` | {spec.title} | {', '.join(spec.tags)} |"
+        )
+    (output / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def validate_output_target(output: Path = OUTPUT) -> None:
+    examples_dir = ROOT / "examples"
+    if (
+        examples_dir.is_symlink()
+        or output.is_symlink()
+        or output.parent != examples_dir
+    ):
+        raise RuntimeError(
+            "Refusing to replace a generated-output path through a symlink"
+        )
+    if output.exists() and not output.is_dir():
+        raise RuntimeError("Generated-output target must be a directory")
+
+
+def _atomic_exchange_directories(first: Path, second: Path) -> None:
+    """Atomically swap two directory names without an observable missing path."""
+    library = ctypes.CDLL(None, use_errno=True)
+    first_bytes = os.fsencode(first)
+    second_bytes = os.fsencode(second)
+
+    if sys.platform == "darwin":
+        try:
+            exchange = library.renamex_np
+        except AttributeError as exc:
+            raise RuntimeError(
+                "This macOS version does not provide atomic directory exchange"
+            ) from exc
+        exchange.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        exchange.restype = ctypes.c_int
+        result = exchange(first_bytes, second_bytes, 0x00000002)  # RENAME_SWAP
+    elif sys.platform.startswith("linux"):
+        try:
+            exchange = library.renameat2
+        except AttributeError as exc:
+            raise RuntimeError(
+                "This Linux runtime does not provide atomic directory exchange"
+            ) from exc
+        exchange.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        exchange.restype = ctypes.c_int
+        result = exchange(
+            -100,  # AT_FDCWD
+            first_bytes,
+            -100,
+            second_bytes,
+            0x00000002,  # RENAME_EXCHANGE
+        )
+    else:
+        raise RuntimeError(
+            f"Atomic directory exchange is not supported on {sys.platform}"
+        )
+
+    if result != 0:
+        error_number = ctypes.get_errno() or errno.EIO
+        raise OSError(
+            error_number,
+            "Could not atomically exchange generated-output directories: "
+            f"{os.strerror(error_number)}",
+            f"{first} <-> {second}",
+        )
+
+
+def install_generated_output(staging: Path, output: Path = OUTPUT) -> None:
+    if staging == output:
+        raise RuntimeError("Generated output and staging must be different paths")
+    if staging.is_symlink() or not staging.is_dir():
+        raise RuntimeError("Generated-output staging path must be a directory")
+    if staging.parent != output.parent:
+        raise RuntimeError("Generated output and staging must share a parent directory")
+    if output.is_symlink():
+        raise RuntimeError("Generated-output target must not be a symlink")
+
+    if not output.exists():
+        staging.rename(output)
+        return
+    if not output.is_dir():
+        raise RuntimeError("Generated-output target must be a directory")
+
+    # After the exchange, `output` is the complete new tree and `staging` is
+    # the old tree. The namespace operation itself never exposes a missing
+    # output path, including if the process is terminated immediately after it.
+    _atomic_exchange_directories(staging, output)
+    try:
+        shutil.rmtree(staging)
+    except Exception as cleanup_error:
+        print(
+            f"warning: generated output installed, but old output {staging} "
+            f"could not be removed: {cleanup_error}",
+            file=sys.stderr,
+        )
 
 
 def main() -> None:
+    validate_output_target(OUTPUT)
     specs = problem_specs()
-    if OUTPUT.exists():
-        shutil.rmtree(OUTPUT)
-    PROBLEMS_DIR.mkdir(parents=True)
-    ZIPS_DIR.mkdir(parents=True)
-
-    for index, problem in enumerate(specs, start=1):
-        print(f"[{index:02d}/{len(specs)}] {problem.slug}")
-        write_problem(problem)
-    write_readme(specs)
+    staging = OUTPUT.parent / f".{OUTPUT.name}.staging-{uuid.uuid4().hex}"
+    generation_error: BaseException | None = None
+    staging_created = False
+    staging_complete = False
+    output_installed = False
+    try:
+        # The exclusive root mkdir prevents a UUID collision from reusing or
+        # later deleting a retained staging directory from another run.
+        staging.mkdir()
+        staging_created = True
+        (staging / "problems").mkdir()
+        (staging / "zips").mkdir()
+        for index, problem in enumerate(specs, start=1):
+            print(f"[{index:02d}/{len(specs)}] {problem.slug}")
+            write_problem(problem, staging)
+        write_readme(specs, staging)
+        staging_complete = True
+        install_generated_output(staging, OUTPUT)
+        output_installed = True
+    except BaseException as exc:
+        generation_error = exc
+        raise
+    finally:
+        # If installation succeeded, a remaining staging path is the old tree
+        # and install_generated_output has already warned about its cleanup.
+        # Do not turn a complete new output into a misleading failure.
+        if staging_created and staging.exists() and not output_installed:
+            if generation_error is not None and staging_complete:
+                print(
+                    f"warning: complete generated output retained at {staging}",
+                    file=sys.stderr,
+                )
+            else:
+                try:
+                    shutil.rmtree(staging)
+                except Exception as cleanup_error:
+                    if generation_error is None:
+                        raise
+                    print(
+                        f"warning: failed to remove staging directory {staging}: "
+                        f"{cleanup_error}",
+                        file=sys.stderr,
+                    )
     print(f"Generated {len(specs)} problems under {OUTPUT}")
 
 

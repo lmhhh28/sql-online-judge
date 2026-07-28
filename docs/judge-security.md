@@ -1,22 +1,86 @@
-# Judge Security Notes
+# 判题安全说明
 
-V1 is designed for local practice, not hostile multi-tenant deployment.
+## 适用范围
 
-Current safeguards:
+V1 面向个人、本机和受信任的小范围练习，不是为敌对的多租户互联网服务设计的。FastAPI API、任务队列和判题工作线程位于同一个进程中，PostgreSQL 通常也位于同一台主机。当前措施提供纵深防御和故障清理，但不能替代操作系统、容器或虚拟机级隔离。
 
-- every test case runs in a fresh temporary PostgreSQL database
-- temporary databases are dropped with `DROP DATABASE ... WITH (FORCE)`
-- SQL runs after `SET ROLE oj_runner`
-- `statement_timeout`, `lock_timeout`, and `idle_in_transaction_session_timeout` are set per connection
-- app startup marks interrupted `PENDING`/`RUNNING` submissions as `SE` and drops stale `oj_run_*` databases
-- high-risk statements are blocked before execution:
-  - `CREATE/DROP DATABASE`
-  - `CREATE/ALTER/DROP ROLE`
-  - `ALTER SYSTEM`
-  - `COPY ... PROGRAM`
-  - server file `COPY`
-  - `CREATE EXTENSION`
-  - `SET ROLE`
-  - selected server file functions
+建议 V1 只运行一个后端进程。多 worker 会各自建立线程池，使全局并发上限被按进程放大，也会让启动恢复和进程内任务状态更复杂。
 
-For untrusted users beyond local use, add an OS/container sandbox around PostgreSQL and run judge workers separately from the web process.
+## 每个测试用例的隔离生命周期
+
+每个测试用例都使用新的随机命名 `oj_exec_<32位十六进制>` 角色和 `oj_run_<32位十六进制>` 数据库：
+
+1. 管理连接创建一次性 PostgreSQL 登录角色。该角色为 `NOSUPERUSER`、`NOCREATEDB`、`NOCREATEROLE`、`NOINHERIT`、`NOREPLICATION`、`NOBYPASSRLS`，连接数限制为 1，初始密码有效期为 10 分钟。
+2. 创建由该角色拥有、基于 `template0` 的临时数据库，并撤销 `PUBLIC` 的连接权限。
+3. 判题器以一次性角色直接连接临时数据库；认证完成后立刻把角色改为 `NOLOGIN` 并清除密码，阻止它再建立连接。
+4. 在同一连接上依次执行测试初始化 SQL、用户 SQL 和判题 SQL。用户仍可在自己的临时数据库内使用普通 DML 与 DDL。
+5. 无论结果如何，都尝试取消/终止遗留后端、回滚该数据库中的 prepared transaction、以 `DROP DATABASE ... WITH (FORCE)` 删除临时数据库，再删除一次性角色。
+
+用户 SQL 不通过 `SET ROLE oj_runner` 执行，也不会继承应用或管理员角色。`setup_db` 创建的 `oj_runner` 是受限、无登录、无继承的基准角色；真正执行用户 SQL 的是每个用例独立的一次性角色。
+
+服务启动时会清理名称、所有者和低权限形态都符合严格规则的遗留 `oj_run_*` 数据库和 `oj_exec_*` 角色，并把上次进程留下的 `PENDING`/`RUNNING` 提交标记为 `SE`。这两个前缀是判题器保留的可销毁命名空间，不应交给其他数据库或角色使用。正常关机时停止接收新判题、取消尚未开始的任务，并请求中断正在执行的 SQL。
+
+## SQL 防护
+
+用户 SQL 有意允许 DML 和 DDL。执行前的 token 级防护会拒绝可能越过临时数据库边界或操纵 PostgreSQL 服务端的语句，包括但不限于：
+
+- 创建、修改或删除数据库、角色/用户、扩展、语言、表空间、外部服务器/订阅等共享或外部资源；
+- `SET`、`RESET`、`DISCARD`、切换角色、修改授权以及 prepared transaction；
+- `COPY`、服务端文件/目录访问、后端控制、配置重载、通知、外部代码加载和其他高风险服务端函数；
+- 创建可执行的服务端函数、过程、规则，或通过动态 SQL/间接绑定绕过上述限制。
+
+防护器会忽略注释和字符串字面量，理解常见 PostgreSQL 引号形式，并拒绝难以安全还原的 Unicode 转义标识符。不过它不是 PostgreSQL 的完整语法解析器；真正的安全边界仍依赖一次性低权限角色、独立数据库、资源限额和主机级隔离。
+
+## 并发与队列
+
+- 专用判题线程池最多同时执行 2 个提交，避免阻塞 FastAPI 的通用线程池。
+- 进程内最多允许 16 个判题任务占用执行容量；其中最多 2 个运行，其余等待。容量已满时，新提交会被标记为 `SE` 并提示稍后重试。
+- 单个用户最多同时有 3 个 `PENDING`/`RUNNING` 提交。
+- 整个提交的判题阶段（跨全部测试用例）共享 300 秒墙钟预算；达到上限后不再启动后续 SQL，并以 `TLE` 结束。资源回收和限时的管理操作可能在该预算之外继续片刻。
+
+这些限制都是单进程限制，不是跨多进程或跨主机的分布式配额。
+
+## 时间、内存、磁盘与输出限制
+
+每个题目的用户 SQL 时间限制会夹在 100–30000 毫秒之间。`statement_timeout`、`lock_timeout` 和 `idle_in_transaction_session_timeout` 都会在连接上设置，同时另有 Python 墙钟 watchdog；超时后先安全取消查询，仍未结束则只按精确的进程号、数据库名和角色名终止后端。初始化/判题 SQL 有独立的系统阶段上限，并同样受整个提交 300 秒上限约束。管理操作的超时为 10 秒。
+
+一次性角色和会话还应用以下 PostgreSQL 资源设置：
+
+- `work_mem = 16MB`
+- `maintenance_work_mem = 32MB`
+- `temp_file_limit = 64MB`
+- `max_parallel_workers_per_gather = 0`
+- `max_parallel_maintenance_workers = 0`
+- `jit = off`
+
+临时数据库大小上限为 256 MiB，每 100 毫秒由独立 watchdog 查询一次。超过限制会取消查询；如果数据库大小 watchdog 本身失败，也会按失败关闭原则中止该阶段。
+
+查询结果使用逐行读取并转成有界 CSV，限制为：
+
+- 最多 10,000 行；
+- 最多 256 列；
+- 整份 CSV 最多 1,000,000 字节；
+- 单个转换后的单元格最多 1,000,000 字节。
+
+返回提交详情时，单个可见的 `actual_output` 或 `expected_output` 最多保留 256 KiB；一次响应中所有可见输出字段合计最多 2 MiB，超出部分截断或省略。普通用户的隐藏用例输出不会进入响应。
+
+## `run`、`submit` 与信息隔离
+
+- `run` 只执行公开用例；`submit` 执行全部用例。
+- 普通用户无法通过题目接口读取隐藏用例。
+- 普通用户查看隐藏测试结果时，看不到原用例名、预期输出或实际输出，运行时间固定为 0，消息被替换为通用文本；管理员可查看未做隐藏脱敏的细节，但持久化与响应仍受输出截断或省略上限约束。
+- 提交列表只提供状态和分数等摘要，不返回用户 SQL 或逐用例输出。提交详情仅对提交者本人和管理员开放。
+
+隐藏用例的状态、得分以及提交的总分仍是产品反馈的一部分，不应把它们当作完全不可观察的秘密信道。若威胁模型要求连逐用例状态或分数都不可见，需要进一步改变产品协议。
+
+## 仍需主机级隔离的边界
+
+以下风险不能仅靠当前应用进程完全消除：
+
+- PostgreSQL/psycopg 可能先在服务端或客户端物化一个巨大单元格或宽行，再由 Python 检查单元格、列数和整份输出上限；因此单次内存峰值不能由输出限额严格封顶。
+- `work_mem` 是每个执行节点的预算，不是进程总内存上限；复杂计划、PostgreSQL 本身、驱动和 Python 进程仍可能消耗更多内存。
+- 数据库大小按 100 毫秒轮询，快速写入可能短暂越界；WAL、日志、共享临时资源等也不一定全部计入 `pg_database_size()`。
+- 应用与判题共享 FastAPI 进程；解释器崩溃、强制终止、主机掉电或资源耗尽会同时影响 API 与进行中的判题。
+- SQL 防护和数据库权限不能防御 PostgreSQL 或依赖库本身的漏洞。
+
+面对真正不受信任的用户时，应把 PostgreSQL 判题实例置于独立容器、虚拟机或受限系统用户中，设置操作系统级的内存、CPU、进程、文件和网络配额，并把判题 worker 与 Web API 分进程部署。该增强属于 V1 本地优先架构之外，不能只靠调高当前常量替代。

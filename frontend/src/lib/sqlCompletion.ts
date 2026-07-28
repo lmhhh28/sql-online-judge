@@ -1,6 +1,6 @@
-import type * as monaco from "monaco-editor/esm/vs/editor/editor.api";
+import type * as monaco from "monaco-editor/editor/editor.api";
 
-const PG_KEYWORDS: string[] = [
+const PG_KEYWORDS: readonly string[] = Array.from(new Set([
   "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "DELETE",
   "SET", "CREATE", "TABLE", "VIEW", "INDEX", "DROP", "ALTER", "ADD", "RENAME",
   "TO", "COLUMN", "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "NOT", "NULL",
@@ -20,33 +20,39 @@ const PG_KEYWORDS: string[] = [
   "COUNT", "SUM", "AVG", "MIN", "MAX", "STRING_AGG", "GENERATE_SERIES",
   "ROW_NUMBER", "RANK", "DENSE_RANK", "OVER", "PARTITION", "LEAD", "LAG",
   "GENERATED", "ALWAYS", "IDENTITY", "IF", "EXISTS", "TEMPORARY", "TEMP"
-];
+]));
+
+export const SQL_COMPLETION_LIMITS = Object.freeze({
+  schemaTables: 128,
+  schemaColumnsPerTable: 256,
+  schemaUniqueColumns: 1024,
+  schemaColumnEntries: 4096,
+  tableSuggestions: 128,
+  columnSuggestions: 768,
+  dotColumnSuggestions: 256,
+  totalSuggestions: 1024
+});
 
 export interface SchemaInfo {
   tables: Record<string, string[]>;
   columns: string[];
 }
 
-function splitTopLevelCommas(text: string): string[] {
-  const parts: string[] = [];
+function* splitTopLevelCommas(text: string): Generator<string> {
   let depth = 0;
-  let cur = "";
-  for (const ch of text) {
+  let partStart = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
     if (ch === "(") {
       depth++;
-      cur += ch;
     } else if (ch === ")") {
       depth--;
-      cur += ch;
     } else if (ch === "," && depth === 0) {
-      parts.push(cur);
-      cur = "";
-    } else {
-      cur += ch;
+      yield text.slice(partStart, i);
+      partStart = i + 1;
     }
   }
-  if (cur) parts.push(cur);
-  return parts;
+  if (partStart < text.length) yield text.slice(partStart);
 }
 
 const CONSTRAINT_LEADWORDS = new Set([
@@ -54,21 +60,61 @@ const CONSTRAINT_LEADWORDS = new Set([
 ]);
 
 function columnNameOf(def: string): string | null {
-  const name = def.trim().split(/\s+/)[0];
-  if (!name || !/^[a-zA-Z_]\w*$/.test(name)) return null;
+  const match = /^\s*([a-zA-Z_]\w*)(?=\s|$)/.exec(def);
+  if (!match) return null;
+  const name = match[1];
   if (CONSTRAINT_LEADWORDS.has(name.toLowerCase())) return null;
   return name;
 }
 
 export function parseSchema(md: string): SchemaInfo {
-  const tables: Record<string, string[]> = {};
+  interface TableState {
+    columns: string[];
+    seen: Set<string>;
+  }
+
+  const tableStates = new Map<string, TableState>();
   const columns: string[] = [];
-  const add = (table: string, cols: string[]) => {
-    if (!tables[table]) tables[table] = [];
+  const seenColumns = new Set<string>();
+  let columnEntries = 0;
+
+  const finish = (): SchemaInfo => ({
+    // Object.fromEntries defines names such as "__proto__" as safe own properties.
+    tables: Object.fromEntries(
+      Array.from(tableStates, ([table, state]) => [table, state.columns])
+    ),
+    columns
+  });
+
+  // Returns false as soon as accepting another item would exceed a hard limit.
+  const add = (table: string, cols: Iterable<string>): boolean => {
+    let state = tableStates.get(table);
     for (const c of cols) {
-      if (!tables[table].includes(c)) tables[table].push(c);
-      if (!columns.includes(c)) columns.push(c);
+      if (state?.seen.has(c)) continue;
+      if (state && state.columns.length >= SQL_COMPLETION_LIMITS.schemaColumnsPerTable) {
+        return false;
+      }
+      if (columnEntries >= SQL_COMPLETION_LIMITS.schemaColumnEntries) return false;
+
+      const isNewColumn = !seenColumns.has(c);
+      if (isNewColumn && columns.length >= SQL_COMPLETION_LIMITS.schemaUniqueColumns) {
+        return false;
+      }
+      if (!state) {
+        if (tableStates.size >= SQL_COMPLETION_LIMITS.schemaTables) return false;
+        state = { columns: [], seen: new Set<string>() };
+        tableStates.set(table, state);
+      }
+
+      state.seen.add(c);
+      state.columns.push(c);
+      columnEntries++;
+      if (isNewColumn) {
+        seenColumns.add(c);
+        columns.push(c);
+      }
     }
+    return true;
   };
 
   const tableRe = /create\s+table\s+(?:if\s+not\s+exists\s+)?([a-zA-Z_]\w*)\s*\(/gi;
@@ -90,37 +136,47 @@ export function parseSchema(md: string): SchemaInfo {
         }
       }
     }
-    if (end === -1) continue;
+    // A later match would be nested in the same malformed definition and would
+    // rescan the remaining input. Stop here to keep malformed input linear.
+    if (end === -1) break;
     const inner = md.slice(start + 1, end);
-    const cols = splitTopLevelCommas(inner)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-      .map(columnNameOf)
-      .filter((n): n is string => n !== null);
-    if (cols.length === 0) continue;
-    add(table, cols);
+    function* ddlColumnNames(): Generator<string> {
+      for (const definition of splitTopLevelCommas(inner)) {
+        const name = columnNameOf(definition);
+        if (name !== null) yield name;
+      }
+    }
+    if (!add(table, ddlColumnNames())) return finish();
+    tableRe.lastIndex = end + 1;
   }
-  if (matchedDdl) return { tables, columns };
+  if (matchedDdl) return finish();
 
   // Fallback: legacy "table(col, col)" signature without types.
   const legacyRe = /([a-zA-Z_]\w*)\s*\(([^)]*)\)/g;
   while ((m = legacyRe.exec(md)) !== null) {
     const table = m[1];
-    const cols = m[2]
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => /^[a-zA-Z_]\w*$/.test(s));
-    if (cols.length === 0) continue;
-    add(table, cols);
+    const inner = m[2];
+    function* legacyColumnNames(): Generator<string> {
+      for (const definition of splitTopLevelCommas(inner)) {
+        const name = definition.trim();
+        if (/^[a-zA-Z_]\w*$/.test(name)) yield name;
+      }
+    }
+    if (!add(table, legacyColumnNames())) return finish();
   }
-  return { tables, columns };
+  return finish();
 }
 
 export function createCompletionProvider(
   monacoInstance: typeof monaco,
   schema: SchemaInfo
 ): monaco.languages.CompletionItemProvider {
-  const tableNames = Object.keys(schema.tables);
+  const tableNames: string[] = [];
+  for (const tableName in schema.tables) {
+    if (!Object.prototype.hasOwnProperty.call(schema.tables, tableName)) continue;
+    tableNames.push(tableName);
+    if (tableNames.length >= SQL_COMPLETION_LIMITS.tableSuggestions) break;
+  }
   const kind = monacoInstance.languages.CompletionItemKind;
   return {
     triggerCharacters: [".", " "],
@@ -141,19 +197,35 @@ export function createCompletionProvider(
       const dotMatch = lineUntil.match(/([a-zA-Z_]\w*)\.\s*$/);
       if (dotMatch) {
         const tbl = dotMatch[1];
-        const cols = schema.tables[tbl] ?? [];
-        return {
-          suggestions: cols.map((col) => ({
+        const cols = Object.prototype.hasOwnProperty.call(schema.tables, tbl)
+          ? schema.tables[tbl]
+          : [];
+        const suggestions: monaco.languages.CompletionItem[] = [];
+        const seen = new Set<string>();
+        for (const col of cols) {
+          if (
+            suggestions.length >= SQL_COMPLETION_LIMITS.dotColumnSuggestions ||
+            suggestions.length >= SQL_COMPLETION_LIMITS.totalSuggestions
+          ) {
+            break;
+          }
+          if (seen.has(col)) continue;
+          seen.add(col);
+          suggestions.push({
             label: col,
             kind: kind.Field,
             insertText: col,
             detail: `column · ${tbl}`,
             range
-          }))
+          });
+        }
+        return {
+          suggestions
         };
       }
       const suggestions: monaco.languages.CompletionItem[] = [];
       for (const kw of PG_KEYWORDS) {
+        if (suggestions.length >= SQL_COMPLETION_LIMITS.totalSuggestions) break;
         suggestions.push({
           label: kw,
           kind: kind.Keyword,
@@ -162,6 +234,7 @@ export function createCompletionProvider(
         });
       }
       for (const t of tableNames) {
+        if (suggestions.length >= SQL_COMPLETION_LIMITS.totalSuggestions) break;
         suggestions.push({
           label: t,
           kind: kind.Class,
@@ -170,7 +243,18 @@ export function createCompletionProvider(
           range
         });
       }
+      const seenColumns = new Set<string>();
+      let columnSuggestionCount = 0;
       for (const c of schema.columns) {
+        if (
+          columnSuggestionCount >= SQL_COMPLETION_LIMITS.columnSuggestions ||
+          suggestions.length >= SQL_COMPLETION_LIMITS.totalSuggestions
+        ) {
+          break;
+        }
+        if (seenColumns.has(c)) continue;
+        seenColumns.add(c);
+        columnSuggestionCount++;
         suggestions.push({
           label: c,
           kind: kind.Field,

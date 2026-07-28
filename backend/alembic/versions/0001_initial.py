@@ -7,9 +7,10 @@ Create Date: 2026-07-07
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "0001_initial"
 down_revision: Union[str, None] = None
@@ -49,7 +50,12 @@ def upgrade() -> None:
     op.create_table(
         "test_cases",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("problem_id", sa.Integer(), sa.ForeignKey("problems.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "problem_id",
+            sa.Integer(),
+            sa.ForeignKey("problems.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("is_hidden", sa.Boolean(), nullable=False),
         sa.Column("score", sa.Float(), nullable=False),
@@ -63,8 +69,18 @@ def upgrade() -> None:
     op.create_table(
         "submissions",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("problem_id", sa.Integer(), sa.ForeignKey("problems.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "user_id",
+            sa.Integer(),
+            sa.ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "problem_id",
+            sa.Integer(),
+            sa.ForeignKey("problems.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("code", sa.Text(), nullable=False),
         sa.Column("mode", sa.String(length=16), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False),
@@ -78,8 +94,18 @@ def upgrade() -> None:
     op.create_table(
         "test_results",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("submission_id", sa.Integer(), sa.ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("test_case_id", sa.Integer(), sa.ForeignKey("test_cases.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "submission_id",
+            sa.Integer(),
+            sa.ForeignKey("submissions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "test_case_id",
+            sa.Integer(),
+            sa.ForeignKey("test_cases.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False),
         sa.Column("score", sa.Float(), nullable=False),
@@ -101,4 +127,3 @@ def downgrade() -> None:
     op.drop_table("problems")
     op.drop_index(op.f("ix_users_username"), table_name="users")
     op.drop_table("users")
-
